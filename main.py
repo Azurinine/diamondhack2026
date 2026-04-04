@@ -12,8 +12,18 @@ from notion_sync import sync_notion_to_db
 
 load_dotenv()
 
-async def watchdog_loop(browser: Browser):
-    pass    
+# TODO: Check if url should be blocked (Gemini API)
+# async def check_blacklist(url: str) -> bool:
+#     pass
+
+
+# async def watchdog_loop(browser: Browser):
+#     while True:
+#         cur = await browser.get_current_tab()
+#         # TODO: Check if the url is on the blacklist later
+#         if cur.url == "https://google.com":
+            
+#     pass    
 
 
 async def cli_interface(browser: Browser):
