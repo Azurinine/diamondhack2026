@@ -1,7 +1,12 @@
 import asyncio
 import os
-from browser_use import Browser, Agent, ChatBrowserUse
+# from browser_use import Browser
+from urllib.parse import urlparse
 from dotenv import load_dotenv
+from browser_use import Agent, Browser, ChatBrowserUse
+from google import genai
+
+
 from database import (
     init_db,
     save_urls_to_group,
@@ -12,28 +17,15 @@ from notion_sync import sync_notion_to_db
 
 load_dotenv()
 
-async def watchdog_loop(browser: Browser):
-    print("[Watchdog] Started monitoring...")
-    while True:
-        try:
-            # Polling logic: Retrieve current URL
-            pages = await browser.get_pages()
-            if pages:
-                current_page = pages[0]
-                url = await current_page.get_url()
-
-                # Trigger condition: URL contains "google.com" or "neetcode.io"
-                if "google.com" in url:
-                    print(f"[Watchdog] Trigger detected: {url}. Intervening!")
-
-                    # Fetch the LeetCode group context
-                    context = await get_group_context("LeetCode")
-                    if context:
-                        # 1. Manually open the tabs through the urls list
-                        urls = [u["url"] for u in context.get("urls", [])]
-                        for u in urls:
-                            print(f"[Watchdog] Opening {u}")
-                            await browser.new_page(url=u)
+# TODO: Check if url should be blocked (Gemini API)
+async def check_blacklist(url: str) -> bool:
+    client = genai.Client()
+    response = client.models.generate_content(
+        model="gemini-flash-latest",
+        contents=f"Check if this domain would ever be detrimental to schoolwork, be more harsh when deciding detrimentalness: {url},respond with only 'Yes' or 'No'."
+    )
+    valid = response.text.strip().lower() == "yes"
+    return valid
 
                         # 2. Run the agent to ensure all tabs are on the correct page
                         tasks = context.get("tasks", [])
@@ -154,7 +146,7 @@ async def main():
     # Run Watchdog and CLI concurrently
     await asyncio.gather(
         watchdog_loop(browser),
-    )
+        cli_interface(browser)
 
     await browser.stop()
 
