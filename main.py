@@ -169,7 +169,7 @@ async def main():
     await asyncio.gather(
         watchdog_loop(browser),
         cli_interface(browser)
-
+    )
     await browser.stop()
 
 if __name__ == "__main__":
