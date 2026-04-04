@@ -1,6 +1,6 @@
 import asyncio
 import os
-from browser_use import Browser, Agent, ChatGoogle
+from browser_use import Browser, Agent, ChatBrowserUse
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,7 +16,7 @@ async def main():
     agent = Agent(
         task="Navigate to my gmail and draft an email to myself. Do not send the email.",
         browser=browser,
-        llm=ChatGoogle(model="gemini-flash-latest"),
+        llm=ChatBrowserUse(),
     )
     
     result = await agent.run()
