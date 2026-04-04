@@ -1,16 +1,17 @@
 import asyncio
 import os
 from dotenv import load_dotenv
-from browser_use import Agent, Browser, BrowserConfig
+# from browser_use import Agent, Browser, BrowserConfig
 from database import init_db, get_group_urls
 
 load_dotenv()
 
-async def watchdog_loop():
-    while True:
-        print("[Watchdog] Auditing active tab...")
-        # Logic to check active URL vs Blacklist goes here
-        await asyncio.sleep(60)
+# TODO: Uncomment this after CLI is working
+# async def watchdog_loop():
+#     while True:
+#         print("[Watchdog] Auditing active tab...")
+#         # Logic to check active URL vs Blacklist goes here
+#         await asyncio.sleep(60)
 
 async def cli_interface():
     while True:
@@ -24,7 +25,7 @@ async def main():
     
     # Run Watchdog and CLI concurrently
     await asyncio.gather(
-        watchdog_loop(),
+        # watchdog_loop(), TODO AFTER CLI IS WORKING
         cli_interface()
     )
 
