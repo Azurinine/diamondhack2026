@@ -1,8 +1,12 @@
 import asyncio
 import os
-from browser_use import Browser
+# from browser_use import Browser
+from urllib.parse import urlparse
 from dotenv import load_dotenv
-# from browser_use import Agent, Browser, BrowserConfig
+from browser_use import Agent, Browser, ChatBrowserUse
+from google import genai
+
+
 from database import (
     init_db,
     save_urls_to_group,
@@ -13,8 +17,14 @@ from notion_sync import sync_notion_to_db
 load_dotenv()
 
 # TODO: Check if url should be blocked (Gemini API)
-# async def check_blacklist(url: str) -> bool:
-#     pass
+async def check_blacklist(url: str) -> bool:
+    client = genai.Client()
+    response = client.models.generate_content(
+        model="gemini-flash-latest",
+        contents=f"Check if this domain would ever be detrimental to schoolwork, be more harsh when deciding detrimentalness: {url},respond with only 'Yes' or 'No'."
+    )
+    valid = response.text.strip().lower() == "yes"
+    return valid
 
 
 # async def watchdog_loop(browser: Browser):
