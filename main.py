@@ -1,7 +1,5 @@
 import asyncio
 import os
-# from browser_use import Browser
-from urllib.parse import urlparse
 from dotenv import load_dotenv
 from browser_use import Agent, Browser, ChatBrowserUse
 from google import genai
