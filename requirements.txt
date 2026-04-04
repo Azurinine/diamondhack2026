@@ -1,0 +1,4 @@
+browser-use==0.12.6
+aiosqlite
+python-dotenv
+langchain-google-genai

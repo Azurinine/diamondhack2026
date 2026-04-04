@@ -35,7 +35,7 @@ async def test_browser():
         await browser.start()
         
         print("Navigating to google.com...")
-        await browser.navigate_to("https://google.com")
+        await browser.navigate_to("https://youtube.com")
         
         print("\nSUCCESS: Browser launched! Look for the Chrome window.")
         print("Press Ctrl+C in this terminal to close the connection and exit.")
