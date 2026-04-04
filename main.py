@@ -1,83 +1,56 @@
 import asyncio
 import os
+from browser_use import Browser
 from dotenv import load_dotenv
 # from browser_use import Agent, Browser, BrowserConfig
 from database import (
-    init_db, get_all_groups, get_group_context,
-    save_urls_to_group, check_blacklist, toggle_blacklist,
-    sync_tasks, upsert_inferred_task
+    init_db,
+    save_urls_to_group,
+    add_group,
 )
 from notion_sync import sync_notion_to_db
 
 load_dotenv()
 
-# TODO: Uncomment this after CLI is working
-# async def watchdog_loop():
-#     while True:
-#         print("[Watchdog] Auditing active tab...")
-#         # Logic to check active URL vs Blacklist goes here
-#         await asyncio.sleep(60)
+async def watchdog_loop(browser: Browser):
+    pass    
 
-async def cli_interface():
+
+async def cli_interface(browser: Browser):
     while True:
         cmd = await asyncio.to_thread(input, "Pilot > ")
         if cmd == "exit":
             break
 
-        parts = cmd.strip().split(maxsplit=1)
-        command = parts[0] if parts else ""
-        arg = parts[1] if len(parts) > 1 else ""
+        parts = cmd.strip().split()
+        if not parts:
+            continue
 
-        if command == "save":
-            if not arg:
-                print("Usage: save [group]")
+        command = parts[0]
+
+        if command == "group":
+            if len(parts) >= 3 and parts[1] == "add":
+                name = parts[2]
+                description = " ".join(parts[3:]) if len(parts) > 3 else ""
+                try:
+                    group_id = await add_group(name, description)
+                    print(f"Success! Added group '{name}' with ID {group_id}")
+                except Exception as e:
+                    print(f"Error adding group: {e}")
             else:
-                # TODO: replace stub with real browser tab fetching
-                stub_urls = ["https://stub.example.com"]
-                await save_urls_to_group(arg, stub_urls)
-                print(f"Saved {len(stub_urls)} tab(s) to group '{arg}'")
+                print("Usage: group add <name> [description...]")
 
-        elif command == "mode":
+        elif command == "save":
+            arg = " ".join(parts[1:]) if len(parts) > 1 else ""
             if not arg:
-                groups = await get_all_groups()
-                print("Available groups:")
-                for g in groups:
-                    print(f"  [{g['id']}] {g['name']} — {g['description']}")
+                print("Usage: save <group>")
             else:
-                context = await get_group_context(arg)
-                if not context:
-                    print(f"Group '{arg}' not found.")
-                else:
-                    print(f"\n=== Mission Brief: {context['name']} ===")
-                    print(f"Description: {context['description']}")
-                    print(f"URLs ({len(context['urls'])}):")
-                    for u in context['urls']:
-                        flag = " [BLACKLISTED]" if u['is_blacklisted'] else ""
-                        print(f"  {u['url']}{flag}")
-                    print(f"Active Tasks ({len(context['tasks'])}):")
-                    for t in context['tasks']:
-                        print(f"  - {t['name']} (due: {t['due_date'] or 'N/A'}) [{t['source']}]")
-
-        elif command == "audit":
-            # TODO: replace stub with real active tab URL from browser
-            stub_url = "https://www.youtube.com/watch?v=stub"
-            is_blocked = await check_blacklist(stub_url)
-            status = "BLACKLISTED" if is_blocked else "OK"
-            print(f"[Audit] {stub_url} → {status}")
-
-        elif command == "break":
-            mins = arg if arg else "5"
-            print(f"[Break] Safe zone active for {mins} minute(s). Watchdog paused.")
-            # TODO: integrate with watchdog_loop timer
-
-        elif command == "blacklist":
-            if not arg:
-                print("Usage: blacklist [url]")
-            else:
-                new_val = await toggle_blacklist(arg)
-                state = "blacklisted" if new_val else "removed from blacklist"
-                print(f"'{arg}' is now {state}.")
-
+                tabs = await browser.get_tabs()
+                urls = [tab.url for tab in tabs]
+                print(urls)
+                await save_urls_to_group(arg, urls)
+                print(f"Saved {len(urls)} tab(s) to group '{arg}'")
+        
         elif command == "notion-sync":
             if not arg:
                 db_id = os.getenv("NOTION_DATABASE_ID", "")
@@ -87,18 +60,29 @@ async def cli_interface():
                     await sync_notion_to_db(db_id)
             else:
                 await sync_notion_to_db(arg)
-
-        elif command:
-            print(f"Unknown command: '{command}'. Try: save, mode, audit, break, blacklist, notion-sync, exit")
+                
+        else:
+            print(f"Unknown command: {command}")
+        
+        
 
 async def main():
     await init_db()
+
+    browser = Browser.from_system_chrome(
+        profile_directory=os.getenv("CHROME_PROFILE"),
+    )
+
+    await browser.start()
+    await browser.navigate_to("https://google.com")
     
     # Run Watchdog and CLI concurrently
     await asyncio.gather(
         # watchdog_loop(), TODO AFTER CLI IS WORKING
-        cli_interface()
+        cli_interface(browser)
     )
+
+    await browser.stop()
 
 if __name__ == "__main__":
     asyncio.run(main())
