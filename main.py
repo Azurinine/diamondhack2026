@@ -22,7 +22,7 @@ async def watchdog_loop(browser: Browser):
                 url = await current_page.get_url()
 
                 # Trigger condition: URL contains "google.com" or "neetcode.io"
-                if "google.com" in url or "neetcode.io" in url:
+                if "google.com" in url:
                     print(f"[Watchdog] Trigger detected: {url}. Intervening!")
 
                     # Fetch the LeetCode group context
@@ -52,11 +52,11 @@ async def watchdog_loop(browser: Browser):
                         )
                         await agent.run()
                         print("[Watchdog] Intervention complete. Sleeping for 5 minutes.")
-                        await asyncio.sleep(300) # Cooldown
+                        await asyncio.sleep(5) # Cooldown
         except Exception as e:
             print(f"[Watchdog] Error in loop: {e}")
 
-        await asyncio.sleep(30)
+        await asyncio.sleep(5)
 
 async def cli_interface(browser: Browser):
     while True:
@@ -143,9 +143,11 @@ async def main():
 
     browser = Browser.from_system_chrome(
         profile_directory=os.getenv("CHROME_PROFILE"),
+        keep_alive=True,
     )
 
     await browser.start()
+    await browser.navigate_to("https://www.google.com")  # Initial page``
     
     # Run Watchdog and CLI concurrently
     await asyncio.gather(
