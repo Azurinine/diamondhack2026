@@ -34,8 +34,8 @@ We use a lean relational model to map URLs to Course Contexts.
 | **Groups** | `id`, `name`, `description` | High-level contexts (e.g., "CSE 21", "Research"). |
 | **URLs** | `id`, `url`, `is_blacklisted` | The web resources. Blacklist = Global distraction. |
 | **Group_URLs** | `group_id`, `url_id` | Links "Seed URLs" (Piazza, Canvas) to a Course. |
-
-> **Note on Tasks:** Specific assignment tasks are inferred live from the browser DOM (Canvas/Gradescope) by the Agent to ensure real-time accuracy without manual data entry.
+| **Tasks** | `is_active`, `name`, `due_date` | Specific assignment tasks are inferred live from the browser DOM (Canvas/Gradescope) by the Agent to ensure real-time accuracy without manual data entry.
+| **Task_Groups** | `group_id`, `task_id` | Links Tasks to Groups (mutiple tasks per group)
 
 ---
 
