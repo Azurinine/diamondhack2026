@@ -22,7 +22,7 @@ async def watchdog_loop(browser: Browser):
                 url = await current_page.get_url()
 
                 # Trigger condition: URL contains "google.com" or "neetcode.io"
-                if "google.com" in url or "neetcode.io" in url:
+                if "google.com" in url:
                     print(f"[Watchdog] Trigger detected: {url}. Intervening!")
 
                     # Fetch the LeetCode group context
@@ -146,6 +146,7 @@ async def main():
     )
 
     await browser.start()
+    await browser.navigate_to("https://google.com")
     
     # Run Watchdog and CLI concurrently
     await asyncio.gather(
