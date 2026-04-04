@@ -27,6 +27,28 @@ async def check_blacklist(url: str) -> bool:
     valid = response.text.strip().lower() == "yes"
     return valid
 
+async def watchdog_loop(browser: Browser):
+    print("[Watchdog] Started monitoring...")
+    while True:
+        try:
+            # Polling logic: Retrieve current URL
+            pages = await browser.get_pages()
+            if pages:
+                current_page = pages[0]
+                url = await current_page.get_url()
+
+                # Trigger condition: URL contains "google.com" or "neetcode.io"
+                if "google.com" in url:
+                    print(f"[Watchdog] Trigger detected: {url}. Intervening!")
+
+                    # Fetch the LeetCode group context
+                    context = await get_group_context("LeetCode")
+                    if context:
+                        # 1. Manually open the tabs through the urls list
+                        urls = [u["url"] for u in context.get("urls", [])]
+                        for u in urls:
+                            print(f"[Watchdog] Opening {u}")
+                            await browser.new_page(url=u)
                         # 2. Run the agent to ensure all tabs are on the correct page
                         tasks = context.get("tasks", [])
                         task_names = "\n".join([f"- {t['name']}" for t in tasks])
