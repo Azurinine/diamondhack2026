@@ -207,3 +207,14 @@ marimo/_lsp/
 __marimo__/
 
 
+
+# Ignore local databases folder and all its contents (keep a .gitkeep if you want the empty folder kept)
+# To ignore everything inside `databases/`:
+/databases/
+
+# If you want to keep a placeholder file (so the directory can be committed), create
+# `databases/.gitkeep` and use the following instead to ignore everything except that file:
+#/databases/**
+#!/databases/.gitkeep
+
+
