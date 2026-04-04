@@ -1,0 +1,12 @@
+[project]
+name = "diamondhack2026"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "aiosqlite>=0.21.0",
+    "browser-use==0.12.6",
+    "langchain-google-genai>=2.0.9",
+    "python-dotenv>=1.0.1",
+]
