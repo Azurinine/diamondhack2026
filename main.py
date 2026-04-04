@@ -1,8 +1,7 @@
 import asyncio
 import os
-from browser_use import Browser
+from browser_use import Browser, Agent, ChatBrowserUse
 from dotenv import load_dotenv
-# from browser_use import Agent, Browser, BrowserConfig
 from database import (
     init_db,
     save_urls_to_group,
@@ -12,19 +11,52 @@ from notion_sync import sync_notion_to_db
 
 load_dotenv()
 
-# TODO: Check if url should be blocked (Gemini API)
-# async def check_blacklist(url: str) -> bool:
-#     pass
+async def watchdog_loop(browser: Browser):
+    print("[Watchdog] Started monitoring...")
+    while True:
+        try:
+            # Polling logic: Retrieve current URL
+            pages = await browser.get_pages()
+            if pages:
+                current_page = pages[0]
+                url = await current_page.get_url()
 
+                # Trigger condition: URL contains "google.com" or "neetcode.io"
+                if "google.com" in url:
+                    print(f"[Watchdog] Trigger detected: {url}. Intervening!")
 
-# async def watchdog_loop(browser: Browser):
-#     while True:
-#         cur = await browser.get_current_tab()
-#         # TODO: Check if the url is on the blacklist later
-#         if cur.url == "https://google.com":
-            
-#     pass    
+                    # Fetch the LeetCode group context
+                    context = await get_group_context("LeetCode")
+                    if context:
+                        # 1. Manually open the tabs through the urls list
+                        urls = [u["url"] for u in context.get("urls", [])]
+                        for u in urls:
+                            print(f"[Watchdog] Opening {u}")
+                            await browser.new_page(url=u)
 
+                        # 2. Run the agent to ensure all tabs are on the correct page
+                        tasks = context.get("tasks", [])
+                        task_names = "\n".join([f"- {t['name']}" for t in tasks])
+                        task_prompt = (
+                            "I have several tabs open for my 'LeetCode' workspace. "
+                            "Please navigate these tabs to the correct problem pages based on the following tasks:\n"
+                            f"{task_names}\n"
+                            "For example, if a task is 'Two Sum', find the corresponding problem page on NeetCode and leave the tab open there. Do NOT solve the problems."
+                        )
+
+                        print("[Watchdog] Starting Agent intervention...")
+                        agent = Agent(
+                            task=task_prompt,
+                            browser=browser,
+                            llm=ChatBrowserUse(),
+                        )
+                        await agent.run()
+                        print("[Watchdog] Intervention complete. Sleeping for 5 minutes.")
+                        await asyncio.sleep(5) # Cooldown
+        except Exception as e:
+            print(f"[Watchdog] Error in loop: {e}")
+
+        await asyncio.sleep(5)
 
 async def cli_interface(browser: Browser):
     while True:
@@ -36,6 +68,17 @@ async def cli_interface(browser: Browser):
         if not parts:
             continue
 
+        if command == "save":
+            if not arg:
+                print("Usage: save [group]")
+            else:
+                try:
+                    tabs = await browser.get_tabs()
+                    urls = [tab.url for tab in tabs]
+                    await save_urls_to_group(arg, urls)
+                    print(f"Saved {len(urls)} tab(s) to group '{arg}'")
+                except Exception as e:
+                    print(f"Error saving tabs: {e}")
         command = parts[0]
 
         if command == "group":
@@ -48,6 +91,30 @@ async def cli_interface(browser: Browser):
                 except Exception as e:
                     print(f"Error adding group: {e}")
             else:
+                context = await get_group_context(arg)
+                if not context:
+                    print(f"Group '{arg}' not found.")
+                else:
+                    print(f"\n=== Mission Brief: {context['name']} ===")
+                    print(f"Description: {context['description']}")
+                    print(f"URLs ({len(context['urls'])}):")
+                    for u in context['urls']:
+                        flag = " [BLACKLISTED]" if u['is_blacklisted'] else ""
+                        print(f"  {u['url']}{flag}")
+                    print(f"Active Tasks ({len(context['tasks'])}):")
+                    for t in context['tasks']:
+                        print(f"  - {t['name']} (due: {t['due_date'] or 'N/A'}) [{t['source']}]")
+
+        elif command == "audit":
+            try:
+                pages = await browser.get_pages()
+                if pages:
+                    url = await pages[0].get_url()
+                    is_blocked = await check_blacklist(url)
+                    status = "BLACKLISTED" if is_blocked else "OK"
+                    print(f"[Audit] {url} → {status}")
+            except Exception as e:
+                print(f"[Audit] Error: {e}")
                 print("Usage: group add <name> [description...]")
 
         elif command == "save":
@@ -81,15 +148,15 @@ async def main():
 
     browser = Browser.from_system_chrome(
         profile_directory=os.getenv("CHROME_PROFILE"),
+        keep_alive=True,
     )
 
     await browser.start()
-    await browser.navigate_to("https://google.com")
+    await browser.navigate_to("https://www.google.com")  # Initial page``
     
     # Run Watchdog and CLI concurrently
     await asyncio.gather(
-        # watchdog_loop(), TODO AFTER CLI IS WORKING
-        cli_interface(browser)
+        watchdog_loop(browser),
     )
 
     await browser.stop()
