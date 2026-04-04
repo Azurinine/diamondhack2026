@@ -8,5 +8,6 @@ dependencies = [
     "aiosqlite>=0.21.0",
     "browser-use==0.12.6",
     "langchain-google-genai>=2.0.9",
+    "notion-client>=2.2.1",
     "python-dotenv>=1.0.1",
 ]

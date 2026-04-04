@@ -7,6 +7,7 @@ from database import (
     save_urls_to_group, check_blacklist, toggle_blacklist,
     sync_tasks, upsert_inferred_task
 )
+from notion_sync import sync_notion_to_db
 
 load_dotenv()
 
@@ -77,8 +78,18 @@ async def cli_interface():
                 state = "blacklisted" if new_val else "removed from blacklist"
                 print(f"'{arg}' is now {state}.")
 
+        elif command == "notion-sync":
+            if not arg:
+                db_id = os.getenv("NOTION_DATABASE_ID", "")
+                if not db_id:
+                    print("Usage: notion-sync <database_id>  (or set NOTION_DATABASE_ID in .env)")
+                else:
+                    await sync_notion_to_db(db_id)
+            else:
+                await sync_notion_to_db(arg)
+
         elif command:
-            print(f"Unknown command: '{command}'. Try: save, mode, audit, break, exit")
+            print(f"Unknown command: '{command}'. Try: save, mode, audit, break, blacklist, notion-sync, exit")
 
 async def main():
     await init_db()
