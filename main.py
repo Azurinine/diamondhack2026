@@ -5,7 +5,8 @@ from dotenv import load_dotenv
 from database import (
     init_db,
     save_urls_to_group,
-    add_group,
+    add_group, get_group_context,
+    check_blacklist,
 )
 from notion_sync import sync_notion_to_db
 
@@ -68,18 +69,14 @@ async def cli_interface(browser: Browser):
         if not parts:
             continue
 
+        command = parts[0] 
+        arg = parts[1] if len(parts) > 1 else ""
+
         if command == "save":
-            if not arg:
-                print("Usage: save [group]")
-            else:
-                try:
-                    tabs = await browser.get_tabs()
-                    urls = [tab.url for tab in tabs]
-                    await save_urls_to_group(arg, urls)
-                    print(f"Saved {len(urls)} tab(s) to group '{arg}'")
-                except Exception as e:
-                    print(f"Error saving tabs: {e}")
-        command = parts[0]
+            tabs = await browser.get_tabs()
+            urls = [tab.url for tab in tabs]
+            await save_urls_to_group(arg, urls)
+            print(f"Saved {len(urls)} tab(s) to group '{arg}'")
 
         if command == "group":
             if len(parts) >= 3 and parts[1] == "add":

@@ -15,7 +15,7 @@ async def _connect():
 
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
-        with open("schema.sql", "r") as f:
+        with open("databases/schema.sql", "r") as f:
             await db.executescript(f.read())
         await db.commit()
 
