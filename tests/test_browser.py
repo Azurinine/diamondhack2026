@@ -44,7 +44,6 @@ async def test_browser():
         while True:
             await asyncio.sleep(1)
     except Exception as e:
-        print(f"\nERROR: Could not launch browser. Ensure all Chrome windows are CLOSED.")
         print(f"Details: {e}")
         import traceback
         traceback.print_exc()

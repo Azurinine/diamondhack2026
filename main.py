@@ -3,9 +3,9 @@ import os
 from browser_use import Browser, Agent, ChatBrowserUse
 from dotenv import load_dotenv
 from database import (
-    init_db, get_all_groups, get_group_context,
-    save_urls_to_group, check_blacklist, toggle_blacklist,
-    sync_tasks, upsert_inferred_task
+    init_db,
+    save_urls_to_group,
+    add_group,
 )
 from notion_sync import sync_notion_to_db
 
@@ -64,9 +64,9 @@ async def cli_interface(browser: Browser):
         if cmd == "exit":
             break
 
-        parts = cmd.strip().split(maxsplit=1)
-        command = parts[0] if parts else ""
-        arg = parts[1] if len(parts) > 1 else ""
+        parts = cmd.strip().split()
+        if not parts:
+            continue
 
         if command == "save":
             if not arg:
@@ -79,13 +79,17 @@ async def cli_interface(browser: Browser):
                     print(f"Saved {len(urls)} tab(s) to group '{arg}'")
                 except Exception as e:
                     print(f"Error saving tabs: {e}")
+        command = parts[0]
 
-        elif command == "mode":
-            if not arg:
-                groups = await get_all_groups()
-                print("Available groups:")
-                for g in groups:
-                    print(f"  [{g['id']}] {g['name']} — {g['description']}")
+        if command == "group":
+            if len(parts) >= 3 and parts[1] == "add":
+                name = parts[2]
+                description = " ".join(parts[3:]) if len(parts) > 3 else ""
+                try:
+                    group_id = await add_group(name, description)
+                    print(f"Success! Added group '{name}' with ID {group_id}")
+                except Exception as e:
+                    print(f"Error adding group: {e}")
             else:
                 context = await get_group_context(arg)
                 if not context:
@@ -111,20 +115,19 @@ async def cli_interface(browser: Browser):
                     print(f"[Audit] {url} → {status}")
             except Exception as e:
                 print(f"[Audit] Error: {e}")
+                print("Usage: group add <name> [description...]")
 
-        elif command == "break":
-            mins = arg if arg else "5"
-            print(f"[Break] Safe zone active for {mins} minute(s). Watchdog paused.")
-            # TODO: integrate with watchdog_loop timer
-
-        elif command == "blacklist":
+        elif command == "save":
+            arg = " ".join(parts[1:]) if len(parts) > 1 else ""
             if not arg:
-                print("Usage: blacklist [url]")
+                print("Usage: save <group>")
             else:
-                new_val = await toggle_blacklist(arg)
-                state = "blacklisted" if new_val else "removed from blacklist"
-                print(f"'{arg}' is now {state}.")
-
+                tabs = await browser.get_tabs()
+                urls = [tab.url for tab in tabs]
+                print(urls)
+                await save_urls_to_group(arg, urls)
+                print(f"Saved {len(urls)} tab(s) to group '{arg}'")
+        
         elif command == "notion-sync":
             if not arg:
                 db_id = os.getenv("NOTION_DATABASE_ID", "")
@@ -134,9 +137,11 @@ async def cli_interface(browser: Browser):
                     await sync_notion_to_db(db_id)
             else:
                 await sync_notion_to_db(arg)
-
-        elif command:
-            print(f"Unknown command: '{command}'. Try: save, mode, audit, break, blacklist, notion-sync, exit")
+                
+        else:
+            print(f"Unknown command: {command}")
+        
+        
 
 async def main():
     await init_db()
@@ -152,7 +157,6 @@ async def main():
     # Run Watchdog and CLI concurrently
     await asyncio.gather(
         watchdog_loop(browser),
-        cli_interface(browser)
     )
 
     await browser.stop()
