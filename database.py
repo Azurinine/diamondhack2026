@@ -1,12 +1,15 @@
 import aiosqlite
 from google import genai
 from dotenv import load_dotenv
+DB_PATH = "databases/pilot.db"
+
 from urllib.parse import urlparse
 
 load_dotenv()
 
 DB_PATH = "databases/pilot.db"
 
+load_dotenv()
 
 async def _connect():
     """Open a connection with foreign keys enabled and row factory set."""
@@ -119,7 +122,6 @@ async def get_group_context(group_name) -> dict:
 
 
 # ── Part 3: URL & Watchdog ────────────────────────────────────────────────────
-
 # TODO: Check if url should be blocked (Gemini API)
 async def blackout(url: str) -> bool:
     client =  genai.Client()
@@ -130,7 +132,6 @@ async def blackout(url: str) -> bool:
     if response.text:
         return "yes" in response.text.strip().lower()
     return False
-
 async def check_blacklist(url) -> bool:
     """Returns True if the given URL matches any blacklisted pattern (prefix match)."""
     db = await _connect()
@@ -169,22 +170,19 @@ async def save_urls_to_group(group_name, urls: list):
             # Check if URL exists
             cursor = await db.execute("SELECT id, domain FROM URLs WHERE url = ?", (url,))
             url_row = await cursor.fetchone()
-
             if not url_row:
                 print(f"🔍 New URL detected: {url}. Checking with Gemini...")
                 is_blacklisted = await blackout(url)
+                # 3. Save the new URL to the DB (along with your blacklist result if you have a column for it)
                 await db.execute(
-                    "INSERT INTO URLs (url, domain, is_blacklisted) VALUES (?, ?, ?)", 
-                    (url, domain, 1 if is_blacklisted else 0)
+                    "INSERT INTO URLs (url, is_blacklisted) VALUES (?, ?)", 
+                    (url, is_blacklisted)
                 )
                 # Get the ID of the row we just created
                 cursor = await db.execute("SELECT id FROM URLs WHERE url = ?", (url,))
                 url_row = await cursor.fetchone()
             else:
-                print(f"✅ {url} found in local DB. Updating domain if needed.")
-                if not url_row["domain"] or url_row["domain"] == "":
-                    await db.execute("UPDATE URLs SET domain = ? WHERE id = ?", (domain, url_row["id"]))
-
+                print(f"✅ {url} found in local DB. Skipping AI call.")
             await db.execute(
                 "INSERT OR IGNORE INTO Group_URLs (group_id, url_id) VALUES (?, ?)",
                 (group_id, url_row["id"])

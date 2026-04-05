@@ -18,15 +18,6 @@ from notion_sync import sync_notion_to_db
 
 load_dotenv()
 
-# TODO: Check if url should be blocked (Gemini API)
-async def check_blacklist(url: str) -> bool:
-    client = genai.Client()
-    response = client.models.generate_content(
-        model="gemini-flash-latest",
-        contents=f"Check if this domain would ever be detrimental to schoolwork, be more harsh when deciding detrimentalness: {url},respond with only 'Yes' or 'No'."
-    )
-    valid = response.text.strip().lower() == "yes"
-    return valid
 
 async def watchdog_loop(browser: Browser):
     print("[Watchdog] Started monitoring...")
