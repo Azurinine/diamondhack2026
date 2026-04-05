@@ -17,6 +17,7 @@ from notion_sync import sync_notion_to_db
 
 load_dotenv()
 
+override_event = asyncio.Event()
 
 LOGIN_URL_INDICATORS = (
     "login", "signin", "sign-in", "sign_in", "sso", "shibboleth",
@@ -160,7 +161,87 @@ async def productivity_agent(url: str,browser: Browser) -> bool:
     
     return "yes" in response_text
 
+# async def manual_override(url: str):
+#     try:
+#         print(f"[Watchdog] Override signal received for: {url}")
+#         # 1. Update your database/list
+#         # await your_db_update_logic(url) 
+#         # 2. Trigger the event to stop the 60s sleep in watchdog_loop
+#         override_event.set() 
+#         # 3. CRITICAL: Return something so JS knows we are done!
+#         return "OK" 
+#     except Exception as e:
+#         print(f"[Watchdog] Override Error: {e}")
+#         return "Error"
+# async def show_productivity_banner(browser, url: str):
+#     page_obj = await browser.get_current_page()
+#     if not page_obj:
+#         return
 
+#     # Use getattr to safely find the raw Playwright page
+#     playwright_page = getattr(page_obj, 'page', page_obj)
+
+#     try:
+#         # Expose the Python function so the browser can call it
+#         await playwright_page.expose_function("pythonOverride", lambda u: manual_override(u))
+#     except Exception:
+#         pass 
+
+#     # Clean JavaScript: No Python comments (#) inside the string!
+#     js_code = """
+#     (url) => {
+#         const BANNER_ID = 'watchdog-override-banner';
+#         if (document.getElementById(BANNER_ID)) return;
+
+#         const div = document.createElement('div');
+#         div.id = BANNER_ID;
+#         div.innerHTML = `
+#             <div style="display:flex; align-items:center; justify-content:space-between; width:100%; max-width:850px; margin:0 auto; gap:20px;">
+#                 <div style="display:flex; align-items:center; gap:10px;">
+#                     <span style="font-size:20px;">🛑</span>
+#                     <span><b>Watchdog:</b> Blacklisted. Redirecting in 60s...</span>
+#                 </div>
+#                 <button id="override-btn" style="background:white; color:#d9534f; border:none; padding:8px 16px; border-radius:4px; font-weight:bold; cursor:pointer;">
+#                     Override (School Work)
+#                 </button>
+#             </div>
+#         `;
+        
+#         div.style.cssText = "position:fixed !important; top:0 !important; left:0 !important; width:100% !important; " +
+#                            "background:#d9534f !important; color:white !important; padding:15px !important; " +
+#                            "z-index:2147483647 !important; font-family:sans-serif !important; box-shadow:0 2px 10px rgba(0,0,0,0.5) !important;";
+        
+#         document.body.appendChild(div);
+
+#         const btn = document.getElementById('override-btn');
+#         btn.onclick = async () => {
+#             btn.textContent = 'Whitelisting...';
+#             btn.disabled = true;
+            
+#             try {
+#                 // Call Python and wait for the 'return'
+#                 await window.pythonOverride(url);
+                
+#                 // If we get here, Python successfully returned a value
+#                 div.style.background = '#28a745';
+#                 div.innerHTML = '<div style="width:100%; text-align:center;">✅ Success! Resuming...</div>';
+                
+#                 // Remove banner quickly
+#                 setTimeout(() => div.remove(), 1500);
+#             } catch (err) {
+#                 console.error('Watchdog: Python communication failed', err);
+#                 btn.textContent = 'Error - Try Again';
+#                 btn.disabled = false;
+#             }
+#         };
+#     }
+#     """
+
+#     try:
+#         # Pass the 'url' variable into the (url) => { ... } argument
+#         await playwright_page.evaluate(js_code, url)
+#     except Exception as e:
+#         print(f"[Watchdog] Popup Error: {e}")
 async def watchdog_loop(browser: Browser):
     print("[Watchdog] Started monitoring...")
     last_url = None
@@ -182,19 +263,34 @@ async def watchdog_loop(browser: Browser):
                     # Trigger condition: URL contains "google.com"
                     # TODO CHECK IF URL IN DATABASE IS BLACKLISTED, IF NOT FOUND THEN ADD URL
                     if not is_productive:
-                        #delete url from database and add url to database with is_blacklisted = True
-                        remove_url_from_group("General", url)
                         print(f"[Watchdog] Trigger detected: {url}. Intervening!")
+    
+                        # Reset the event before showing the banner
+                        #override_event.clear()
+    
+                        #await show_productivity_banner(browser, url)
+    
+                        #print("[Watchdog] Waiting for override (60s max)...")
+                        # try:
+                        #     # This replaces the 60s sleep. It wakes up IMMEDIATELY if the button is clicked.
+                        #     await asyncio.wait_for(override_event.wait(), timeout=60)
+                        #     print("[Watchdog] Override received! Staying on page.")
+                        #     continue # Skip the intervention and go back to monitoring
+                        # except asyncio.TimeoutError:
+                        #     print("[Watchdog] No override detected in 60s. Proceeding to intervention.")
 
-                        # Fetch the first active task and its associated group URLs
-                        context = await get_urls_for_first_active_task()
-                        if context:
-                            # 1. Manually open the tabs through the urls list
-                            for u in context["urls"]:
-                                print(f"[Watchdog] Opening {u}")
-                                await browser.new_page(url=u)
-                            # 2. Run the agent to ensure all tabs are on the correct page
-                            await run_agent_intervention(browser, context)
+                        still_blacklisted = await check_blacklist(url)
+                        if still_blacklisted:
+                            print("[Watchdog] No manual override detected. Running agent intervention.")
+                            context = await get_urls_for_first_active_task()
+                            if context:
+                            # INTERVENTION GOES INSIDE THE IF BLOCK
+                                for u in context["urls"]:
+                                    print(f"[Watchdog] Opening {u}")
+                                    await browser.new_page(url=u)
+                                    await run_agent_intervention(browser, context)
+                        else:
+                            print("[Watchdog] Manual override detected! Aborting intervention.")
         except Exception as e:
             print(f"[Watchdog] Error in loop: {e}")
 
