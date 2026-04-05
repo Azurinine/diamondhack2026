@@ -1,6 +1,10 @@
 import aiosqlite
-
+from google import genai
+from dotenv import load_dotenv
 from urllib.parse import urlparse
+import os
+
+load_dotenv()
 
 DB_PATH = "databases/pilot.db"
 
@@ -117,6 +121,17 @@ async def get_group_context(group_name) -> dict:
 
 # ── Part 3: URL & Watchdog ────────────────────────────────────────────────────
 
+# TODO: Check if url should be blocked (Gemini API)
+async def blackout(url: str) -> bool:
+    client =  genai.Client()
+    response = await client.aio.models.generate_content(
+        model="gemini-flash-latest",
+        contents=f"Check if this domain is a social media site or a gaming site,respond with only 'Yes' or 'No': {url},"
+    )
+    if response.text:
+        return "yes" in response.text.strip().lower()
+    return False
+
 async def check_blacklist(url) -> bool:
     """Returns True if the given URL matches any blacklisted pattern (prefix match)."""
     db = await _connect()
@@ -141,8 +156,6 @@ async def save_urls_to_group(group_name, urls: list):
             return
         group_id = group["id"]
 
-
-
         for url in urls:
             # Extract domain from URL
             domain = ""
@@ -153,14 +166,26 @@ async def save_urls_to_group(group_name, urls: list):
                     domain = domain[4:] # Remove www. prefix for cleaner grouping
             except Exception:
                 pass
-                
-            await db.execute("INSERT OR IGNORE INTO URLs (url, domain) VALUES (?, ?)", (url, domain))
-            
-            # If the URL already existed but didn't have a domain, let's backfill it
-            await db.execute("UPDATE URLs SET domain = ? WHERE url = ? AND (domain IS NULL OR domain = '')", (domain, url))
-            
-            cursor = await db.execute("SELECT id FROM URLs WHERE url = ?", (url,))
+
+            # Check if URL exists
+            cursor = await db.execute("SELECT id, domain FROM URLs WHERE url = ?", (url,))
             url_row = await cursor.fetchone()
+
+            if not url_row:
+                print(f"🔍 New URL detected: {url}. Checking with Gemini...")
+                is_blacklisted = await blackout(url)
+                await db.execute(
+                    "INSERT INTO URLs (url, domain, is_blacklisted) VALUES (?, ?, ?)", 
+                    (url, domain, 1 if is_blacklisted else 0)
+                )
+                # Get the ID of the row we just created
+                cursor = await db.execute("SELECT id FROM URLs WHERE url = ?", (url,))
+                url_row = await cursor.fetchone()
+            else:
+                print(f"✅ {url} found in local DB. Updating domain if needed.")
+                if not url_row["domain"] or url_row["domain"] == "":
+                    await db.execute("UPDATE URLs SET domain = ? WHERE id = ?", (domain, url_row["id"]))
+
             await db.execute(
                 "INSERT OR IGNORE INTO Group_URLs (group_id, url_id) VALUES (?, ?)",
                 (group_id, url_row["id"])

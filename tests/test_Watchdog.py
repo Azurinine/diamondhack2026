@@ -11,8 +11,10 @@ def check_blacklist(url: str) -> bool:
     client = genai.Client()
     response = client.models.generate_content(
         model="gemini-flash-latest",
-        contents=f"Check if this domain would ever be detrimental to schoolwork, be more harsh when deciding detrimentalness: {url},respond with only 'Yes' or 'No'."
+        contents=f"Check if this domain is a social media site,: {url},"
     )
     print(response.text)
     return response.text.strip().lower() == "yes"
-check_blacklist("https://github.com/Azurinine/diamondhack2026")
+check_blacklist("https://www.youtube.com")
+check_blacklist("https://www.facebook.com" )
+check_blacklist("https://www.instagram.com")
