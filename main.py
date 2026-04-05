@@ -102,6 +102,12 @@ async def run_agent_intervention(browser: Browser, context: dict):
     print("[Watchdog] Intervention complete. Sleeping for 5 minutes.")
     await asyncio.sleep(5) # Cooldown
 
+#TODO TO BE IMPLEMENTED
+async def check_productivity(url: str) -> bool:
+    # TODO CHECK IF URL IS BLACKLISTED, IF NOT FOUND THEN ADD URL
+    # TODO IF URL IS BLACKLISTED THEN CALL FUNCTION CHECK PRODUCTIVITY (to be implemented)
+    return False
+
 async def watchdog_loop(browser: Browser):
     print("[Watchdog] Started monitoring...")
     last_url = None
@@ -117,18 +123,24 @@ async def watchdog_loop(browser: Browser):
                     last_url = url
                     
                     # Trigger condition: URL contains "google.com"
+                    # TODO CHECK IF URL IN DATABASE IS BLACKLISTED, IF NOT FOUND THEN ADD URL
                     if "google.com" in url:
+                        # TODO IF URL IS BLACKLISTED THEN CALL FUNCTION CHECK PRODUCTIVITY (to be implemented)
+                        is_productive = await check_productivity(url)
+                        if is_productive:
+                            continue
+
                         print(f"[Watchdog] Trigger detected: {url}. Intervening!")
 
-                    # Fetch the first active task and its associated group URLs
-                    context = await get_urls_for_first_active_task()
-                    if context:
-                        # 1. Manually open the tabs through the urls list
-                        for u in context["urls"]:
-                            print(f"[Watchdog] Opening {u}")
-                            await browser.new_page(url=u)
-                        # 2. Run the agent to ensure all tabs are on the correct page
-                        await run_agent_intervention(browser, context)
+                        # Fetch the first active task and its associated group URLs
+                        context = await get_urls_for_first_active_task()
+                        if context:
+                            # 1. Manually open the tabs through the urls list
+                            for u in context["urls"]:
+                                print(f"[Watchdog] Opening {u}")
+                                await browser.new_page(url=u)
+                            # 2. Run the agent to ensure all tabs are on the correct page
+                            await run_agent_intervention(browser, context)
         except Exception as e:
             print(f"[Watchdog] Error in loop: {e}")
 
