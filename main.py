@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 from dotenv import load_dotenv
 from browser_use import Agent, Browser, ChatBrowserUse
 from urllib.parse import urlparse
@@ -19,6 +20,7 @@ from notion_sync import sync_notion_to_db
 load_dotenv()
 
 override_event = asyncio.Event()
+on_break_until = 0.0
 
 LOGIN_URL_INDICATORS = (
     "login", "signin", "sign-in", "sign_in", "sso", "shibboleth",
@@ -270,10 +272,22 @@ async def remove_productivity_banner(browser):
         pass
 
 async def watchdog_loop(browser: Browser):
+    global on_break_until
     print("[Watchdog] Started monitoring...")
     last_url = None
     while True:
         try:
+            # Check if we are on a break
+            if time.time() < on_break_until:
+                remaining = int(on_break_until - time.time())
+                if remaining % 60 == 0 and remaining > 0:
+                    print(f"[Watchdog] On break... {remaining // 60}m remaining")
+                await asyncio.sleep(1)
+                continue
+            elif on_break_until > 0:
+                print("[Watchdog] Break is over! Resuming monitoring.")
+                on_break_until = 0.0 # Reset
+                
             # Polling logic: Retrieve current URL
             pages = await browser.get_pages()
             if pages:
@@ -493,6 +507,15 @@ async def cli_interface(browser: Browser):
                 await manual_override(url_to_override)
             else:
                 print("Usage: override [url]")
+
+        elif command == "break":
+            global on_break_until
+            try:
+                minutes = float(arg) if arg else 5.0 # Default 5 mins
+                on_break_until = time.time() + (minutes * 60)
+                print(f"✅ Taking a break for {minutes} minutes. Watchdog paused.")
+            except ValueError:
+                print("Usage: break [minutes]")
 
         elif command == "notion-sync":
             if not arg:
