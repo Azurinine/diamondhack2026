@@ -1,7 +1,7 @@
 import asyncio
 import os
 from dotenv import load_dotenv
-from browser_use import Agent, Browser, ChatBrowserUse, browser
+from browser_use import Agent, Browser, ChatBrowserUse
 
 from database import (
     init_db,
