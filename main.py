@@ -33,10 +33,40 @@ async def create_tab_group(group_name: str, color: str = "blue", browser_session
     try:
         print(f"[Tool] Agent requested tab group: '{group_name}'")
         
+        target_url = ""
+        if browser_session:
+            try:
+                target_url = await browser_session.get_current_page_url()
+            except Exception as e:
+                print(f"[Tool] Could not get URL from session: {e}")
+        
+        target_url_safe = target_url.replace('"', '\\"') if target_url else ""
+        
         # 1. Bring Chrome to front and interact with the main macOS Menu Bar
         # The path is: Tab -> Group Tab (or Group Selected Tab)
-        script = '''
-        tell application "Google Chrome" to activate
+        script = f'''
+        tell application "Google Chrome"
+            set targetUrl to "{target_url_safe}"
+            set windowFound to false
+            if targetUrl is not "" then
+                repeat with w in windows
+                    set tabIndex to 1
+                    repeat with t in tabs of w
+                        try
+                            if URL of t contains targetUrl or targetUrl contains URL of t then
+                                set active tab index of w to tabIndex
+                                set index of w to 1
+                                set windowFound to true
+                                exit repeat
+                            end if
+                        end try
+                        set tabIndex to tabIndex + 1
+                    end repeat
+                    if windowFound then exit repeat
+                end repeat
+            end if
+            activate
+        end tell
         delay 0.4
         tell application "System Events"
             tell process "Google Chrome"
@@ -184,8 +214,39 @@ async def create_tab_group_for_task(browser: Browser, task_name: str, num_new_ta
 
     print(f"[Watchdog] Creating tab group '{task_name}' via menu bar...")
     
-    script = '''
-    tell application "Google Chrome" to activate
+    target_url = ""
+    try:
+        pages = await browser.get_pages()
+        if pages:
+            target_url = await pages[-1].get_url()
+    except Exception as e:
+        print(f"[Watchdog] Could not get URL: {e}")
+        
+    target_url_safe = target_url.replace('"', '\\"') if target_url else ""
+    
+    script = f'''
+    tell application "Google Chrome"
+        set targetUrl to "{target_url_safe}"
+        set windowFound to false
+        if targetUrl is not "" then
+            repeat with w in windows
+                set tabIndex to 1
+                repeat with t in tabs of w
+                    try
+                        if URL of t contains targetUrl or targetUrl contains URL of t then
+                            set active tab index of w to tabIndex
+                            set index of w to 1
+                            set windowFound to true
+                            exit repeat
+                        end if
+                    end try
+                    set tabIndex to tabIndex + 1
+                end repeat
+                if windowFound then exit repeat
+            end repeat
+        end if
+        activate
+    end tell
     delay 0.4
     tell application "System Events"
         tell process "Google Chrome"
