@@ -2,7 +2,8 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from browser_use import Agent, Browser, ChatBrowserUse
-
+from urllib.parse import urlparse
+import subprocess
 from database import (
     init_db,
     save_urls_to_group,
@@ -66,7 +67,6 @@ async def wait_for_logins_if_needed(browser: Browser):
 
 async def run_agent_intervention(browser: Browser, context: dict):
     """Runs the AI agent to navigate tabs to their correct destinations."""
-    group_names = ", ".join(g["name"] for g in context["groups"])
 
     task_prompt = (
         "EXECUTION PROTOCOL (For each initial tab):\n"
@@ -166,8 +166,6 @@ async def manual_override(url: str):
     except Exception as e:
         print(f"[Watchdog] Override Error: {e}")
         return "Error"
-import subprocess
-from urllib.parse import urlparse
 
 async def ask_mac_override(url: str) -> bool:
     """Uses a native macOS AppleScript dialog to ask the user for an override."""
@@ -177,7 +175,7 @@ async def ask_mac_override(url: str) -> bool:
             display_url = urlparse(url).netloc
             if not display_url:
                 display_url = url
-        except:
+        except Exception:
             display_url = url
 
         script = f'''
