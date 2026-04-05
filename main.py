@@ -19,7 +19,7 @@ from notion_sync import sync_notion_to_db
 load_dotenv()
 
 # TODO: Check if url should be blocked (Gemini API)
-async def blackout(url: str) -> bool:
+async def check_blacklist(url: str) -> bool:
     client = genai.Client()
     response = client.models.generate_content(
         model="gemini-flash-latest",
