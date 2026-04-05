@@ -1,6 +1,6 @@
-# Deep Work Pilot
+# Watchdog Pilot
 
-An agentic browser safeguard built for DiamondHacks 2026. Deep Work Pilot is a locally run, AI-powered "Chief of Staff" that monitors your browsing habits, intervenes when you visit blacklisted sites, and automatically sets up specific work environments (Groups) to keep you on task.
+An agentic browser safeguard built for DiamondHacks 2026. Watchdog is a locally run, AI-powered assistant that monitors your browsing habits, intervenes when you visit unproductive sites, and automatically sets up specific work environments to keep you on task.
 
 ## Architecture
 - **Language**: Python 3.13+
@@ -35,25 +35,31 @@ An agentic browser safeguard built for DiamondHacks 2026. Deep Work Pilot is a l
    uv run main.py
    ```
 
-## Demo Mode: CSE 101 Presentation
+## Notion Sync Setup
 
-We have included a specialized "Choreographed Demo" to showcase the Pilot's ability to orchestrate a complex academic environment.
+To use `notion-sync`, you need three things:
 
-1.  **Seed the Demo Data**:
-    ```bash
-    uv run demo_seed.py
-    ```
-    This creates a "CSE 101" group with an active task "HW1" and seeds Canvas and Overleaf URLs.
+**1. API Key**
+Go to [notion.so/my-integrations](https://www.notion.so/my-integrations) → New integration → copy the token → set as `NOTION_API_KEY` in `.env`
 
-2.  **Enable Demo Mode**:
-    Set `DEMO_MODE=True` in your `.env` file.
+**2. Database structure**
+Your Notion database needs:
+- A **Title** property (task name)
+- A **Select or Multi-Select** property named `Group`, `Category`, `Course`, or `Tag` (used to organize tasks)
+- A **Date** property for due dates (optional)
 
-3.  **Run the Demo**:
-    Launch the Pilot and visit a blacklisted site (e.g., YouTube). When the Watchdog intervenes, the Agent will:
-    *   Navigate Overleaf to your specific "CSE 101 HW1" project.
-    *   Find the most recent lecture in your Canvas Calendar.
-    *   "Infer" a Gemini tutor by opening it in a new tab and submitting a Socratic prompt.
-    *   Open supplementary resource tabs (e.g., VisuAlgo).
+**3. Share the database with your integration**
+In Notion: open your database → `···` menu → **Connections** → select your integration.
+Without this step the sync returns a 404.
+
+**4. Get your database ID**
+From the URL: `notion.so/workspace/`**`<this-32-char-id>`**`?v=...`
+
+Then run:
+```bash
+notion-sync <database_id>
+# or set NOTION_DATABASE_ID in .env and just run: notion-sync
+```
 
 ## CLI Command Reference
 
