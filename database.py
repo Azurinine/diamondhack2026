@@ -128,13 +128,25 @@ async def blackout(url: str) -> bool:
     if response.text:
         return "yes" in response.text.strip().lower()
     return False
+    
 async def check_blacklist(url) -> bool:
-    """Returns True if the given URL matches any blacklisted pattern (prefix match)."""
+    """Returns True if the given URL matches any blacklisted pattern (prefix match) or domain match."""
     db = await _connect()
     try:
+        # Extract domain from URL
+        parsed = urlparse(url)
+        domain = parsed.netloc
+        if domain.startswith("www."):
+            domain = domain[4:]
+
+        # Query for matches by prefix or by exact domain
         cursor = await db.execute(
-            "SELECT 1 FROM URLs WHERE ? LIKE url || '%' AND is_blacklisted = 1",
-            (url,)
+            """
+            SELECT 1 FROM URLs 
+            WHERE (? LIKE url || '%' OR (domain = ? AND domain != '')) 
+            AND is_blacklisted = 1
+            """,
+            (url, domain)
         )
         row = await cursor.fetchone()
         return row is not None
@@ -169,16 +181,19 @@ async def save_urls_to_group(group_name, urls: list):
             if not url_row:
                 print(f"🔍 New URL detected: {url}. Checking with Gemini...")
                 is_blacklisted = await blackout(url)
-                # 3. Save the new URL to the DB (along with your blacklist result if you have a column for it)
+                # Save the new URL to the DB with domain and AI blacklist result
                 await db.execute(
-                    "INSERT INTO URLs (url, is_blacklisted) VALUES (?, ?)", 
-                    (url, is_blacklisted)
+                    "INSERT INTO URLs (url, domain, is_blacklisted) VALUES (?, ?, ?)", 
+                    (url, domain, 1 if is_blacklisted else 0)
                 )
                 # Get the ID of the row we just created
                 cursor = await db.execute("SELECT id FROM URLs WHERE url = ?", (url,))
                 url_row = await cursor.fetchone()
             else:
-                print(f"✅ {url} found in local DB. Skipping AI call.")
+                print(f"✅ {url} found in local DB. Updating domain if needed.")
+                # Backfill domain if it's currently empty
+                if not url_row["domain"] or url_row["domain"] == "":
+                    await db.execute("UPDATE URLs SET domain = ? WHERE id = ?", (domain, url_row["id"]))
             await db.execute(
                 "INSERT OR IGNORE INTO Group_URLs (group_id, url_id) VALUES (?, ?)",
                 (group_id, url_row["id"])
