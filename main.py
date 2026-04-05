@@ -5,7 +5,9 @@ import pyautogui
 # from browser_use import Browser
 from urllib.parse import urlparse
 from dotenv import load_dotenv
-from browser_use import Agent, Browser, ChatBrowserUse
+from browser_use import Agent, Browser, ChatBrowserUse, Controller
+from browser_use.agent.views import ActionResult
+from browser_use.browser.session import BrowserSession
 from google import genai
 
 
@@ -19,6 +21,27 @@ from database import (
 from notion_sync import sync_notion_to_db
 
 load_dotenv()
+
+controller = Controller()
+
+@controller.action("Group specific tabs together and label them")
+async def create_tab_group(group_name: str, color: str = "blue", browser_session: BrowserSession = None):
+    # Pass group_name and color as an argument instead of f-string interpolation
+    # to avoid any quoting/escaping issues in the JS string.
+    js_code = """async (params) => {
+        const tabs = await window.chrome.tabs.query({currentWindow: true, highlighted: true});
+        const tabIds = tabs.map(t => t.id);
+        if (tabIds.length > 0) {
+            const groupId = await window.chrome.tabs.group({tabIds: tabIds});
+            await window.chrome.tabGroups.update(groupId, {title: params.group_name, color: params.color});
+            return "Grouped " + tabIds.length + " tabs as '" + params.group_name + "'.";
+        }
+        return "No tabs were highlighted to group.";
+    }"""
+    page = await browser_session.get_current_page()
+    result = await page.evaluate(js_code, {"group_name": group_name, "color": color})
+    return ActionResult(extracted_content=f"Tab group result: {result}")
+
 
 # TODO: Check if url should be blocked (Gemini API)
 async def check_blacklist(url: str) -> bool:
@@ -80,25 +103,30 @@ async def run_agent_intervention(browser: Browser, context: dict):
     group_names = ", ".join(g["name"] for g in context["groups"])
 
     task_prompt = (
-        f"MISSION: Act as an expert Chief of Staff preparing a focused deep-work environment for the task: '{context['task_name']}' (ID: {context['task_id']}) "
-        f"associated with the group(s): {group_names}.\n\n"
-        
-        "RULES OF ENGAGEMENT:\n"
-        "1. NO WEB SEARCHING: Only use the currently open tabs as your starting points.\n"
-        "2. NO WORK: Never solve, submit, or modify the actual assignment.\n"
-        "3. FORWARD ONLY: Never click 'Back' or re-evaluate a page you have already processed.\n\n"
-        
-        "EXECUTION PROTOCOL (For each initial tab):\n"
-        "STEP 1 - LOCATE: If the current tab is a dashboard/homepage, navigate directly to the specific page for this exact task (e.g., the exact Canvas assignment page or GitHub repo). If already there, proceed to Step 2.\n"
-        "STEP 2 - DISCOVER & SPAWN: Once on the specific task page, scan for highly valuable supporting materials. This is the critical step. Look for:\n"
-        "   - Starter code or repositories.\n"
-        "   - Specific PDF readings required for THIS task.\n"
-        "   - Rubrics or submission guidelines.\n"
-        "   For every valuable material found, extract its URL and open it in a NEW background tab. Do NOT navigate away from the main task page.\n"
-        "STEP 3 - RESTRAINT: You may open up to 4 highly relevant supporting tabs per initial tab (can have less than 4). Crucially, DO NOT switch to or scan the new tabs you just created. They are for the user to read later.\n"
-        "STEP 4 - ADVANCE: Close any intermediate tabs you no longer need, ensure the main task page remains open, and move to the next initial tab.\n\n"
-        "When all initial tabs are processed and supporting materials are spawned in the background, STOP."
+        "Create a tab group named e using create_tab_group"
     )
+
+    # task_prompt = (
+    #     f"MISSION: Act as an expert Chief of Staff preparing a focused deep-work environment for the task: '{context['task_name']}' (ID: {context['task_id']}) "
+    #     f"associated with the group(s): {group_names}.\n\n"
+        
+    #     "RULES OF ENGAGEMENT:\n"
+    #     "1. NO WEB SEARCHING: Only use the currently open tabs as your starting points.\n"
+    #     "2. NO WORK: Never solve, submit, or modify the actual assignment.\n"
+    #     "3. FORWARD ONLY: Never click 'Back' or re-evaluate a page you have already processed.\n\n"
+        
+    #     "EXECUTION PROTOCOL (For each initial tab):\n"
+    #     "STEP 1 - LOCATE: If the current tab is a dashboard/homepage, navigate directly to the specific page for this exact task (e.g., the exact Canvas assignment page or GitHub repo). If already there, proceed to Step 2.\n"
+    #     "STEP 2 - DISCOVER & SPAWN: Once on the specific task page, scan for highly valuable supporting materials. This is the critical step. Look for:\n"
+    #     "   - Starter code or repositories.\n"
+    #     "   - Specific PDF readings required for THIS task.\n"
+    #     "   - Rubrics or submission guidelines.\n"
+    #     "   For every valuable material found, extract its URL and open it in a NEW background tab. Do NOT navigate away from the main task page.\n"
+    #     "STEP 3 - RESTRAINT: You may open up to 4 highly relevant supporting tabs per initial tab (can have less than 4). Crucially, DO NOT switch to or scan the new tabs you just created. They are for the user to read later.\n"
+    #     "STEP 4 - ADVANCE: Close any intermediate tabs you no longer need, ensure the main task page remains open, and move to the next initial tab.\n\n"
+    #     "When all initial tabs are processed and supporting materials are spawned in the background, "
+    #     f"call create_tab_group with group_name='{context['task_name']}' to label all the tabs under one group. Then STOP."
+    # )
 
     await wait_for_logins_if_needed(browser)
 
@@ -109,6 +137,7 @@ async def run_agent_intervention(browser: Browser, context: dict):
     agent = Agent(
         task=task_prompt,
         browser=browser,
+        controller=controller,
         llm=ChatBrowserUse(),
     )
     await agent.run(max_steps=30, on_step_end=on_step_end)
