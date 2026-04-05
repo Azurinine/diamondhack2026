@@ -5,6 +5,8 @@ DB_PATH = "databases/pilot.db"
 
 from urllib.parse import urlparse
 
+load_dotenv()
+
 DB_PATH = "databases/pilot.db"
 
 load_dotenv()
@@ -154,8 +156,6 @@ async def save_urls_to_group(group_name, urls: list):
             return
         group_id = group["id"]
 
-
-
         for url in urls:
             # Extract domain from URL
             domain = ""
@@ -166,13 +166,9 @@ async def save_urls_to_group(group_name, urls: list):
                     domain = domain[4:] # Remove www. prefix for cleaner grouping
             except Exception:
                 pass
-                
-            await db.execute("INSERT OR IGNORE INTO URLs (url, domain) VALUES (?, ?)", (url, domain))
-            
-            # If the URL already existed but didn't have a domain, let's backfill it
-            await db.execute("UPDATE URLs SET domain = ? WHERE url = ? AND (domain IS NULL OR domain = '')", (domain, url))
-            
-            cursor = await db.execute("SELECT id FROM URLs WHERE url = ?", (url,))
+
+            # Check if URL exists
+            cursor = await db.execute("SELECT id, domain FROM URLs WHERE url = ?", (url,))
             url_row = await cursor.fetchone()
             if not url_row:
                 print(f"🔍 New URL detected: {url}. Checking with Gemini...")
@@ -193,6 +189,33 @@ async def save_urls_to_group(group_name, urls: list):
             )
 
         await db.commit()
+    finally:
+        await db.close()
+
+
+async def remove_url_from_group(group_name: str, url: str) -> bool:
+    """Removes a URL from a group's context. Returns True if successfully removed."""
+    db = await _connect()
+    try:
+        cursor = await db.execute(
+            """
+            SELECT gu.group_id, gu.url_id 
+            FROM Group_URLs gu
+            JOIN Groups g ON g.id = gu.group_id
+            JOIN URLs u ON u.id = gu.url_id
+            WHERE g.name = ? AND u.url = ?
+            """, (group_name, url)
+        )
+        link = await cursor.fetchone()
+        
+        if link:
+            await db.execute(
+                "DELETE FROM Group_URLs WHERE group_id = ? AND url_id = ?",
+                (link["group_id"], link["url_id"])
+            )
+            await db.commit()
+            return True
+        return False
     finally:
         await db.close()
 
