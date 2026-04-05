@@ -3,7 +3,6 @@ import os
 from dotenv import load_dotenv
 from browser_use import Agent, Browser, ChatBrowserUse
 
-
 from database import (
     init_db,
     save_urls_to_group,
