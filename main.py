@@ -1,5 +1,7 @@
 import asyncio
 import os
+import subprocess
+import pyautogui
 # from browser_use import Browser
 from urllib.parse import urlparse
 from dotenv import load_dotenv
@@ -12,7 +14,7 @@ from database import (
     save_urls_to_group,
     add_group, get_group_context,
     check_blacklist,
-    get_urls_for_first_active_task,
+    get_urls_for_all_active_tasks,
 )
 from notion_sync import sync_notion_to_db
 
@@ -93,7 +95,7 @@ async def run_agent_intervention(browser: Browser, context: dict):
         "   - Specific PDF readings required for THIS task.\n"
         "   - Rubrics or submission guidelines.\n"
         "   For every valuable material found, extract its URL and open it in a NEW background tab. Do NOT navigate away from the main task page.\n"
-        "STEP 3 - RESTRAINT: You may open up to 4 highly relevant supporting tabs per initial tab. Crucially, DO NOT switch to or scan the new tabs you just created. They are for the user to read later.\n"
+        "STEP 3 - RESTRAINT: You may open up to 4 highly relevant supporting tabs per initial tab (can have less than 4). Crucially, DO NOT switch to or scan the new tabs you just created. They are for the user to read later.\n"
         "STEP 4 - ADVANCE: Close any intermediate tabs you no longer need, ensure the main task page remains open, and move to the next initial tab.\n\n"
         "When all initial tabs are processed and supporting materials are spawned in the background, STOP."
     )
@@ -113,6 +115,57 @@ async def run_agent_intervention(browser: Browser, context: dict):
     print("[Watchdog] Intervention complete. Sleeping for 5 minutes.")
     await asyncio.sleep(5) # Cooldown
 
+async def create_tab_group_for_task(browser: Browser, task_name: str, num_new_tabs: int):
+    """Select newly opened tabs and create a named Chrome tab group using Ctrl+Cmd+P."""
+    if num_new_tabs == 0:
+        return
+
+    all_pages = await browser.get_pages()
+    total_tabs = len(all_pages)
+    first_new_idx = total_tabs - num_new_tabs  # 0-based index of first new tab
+
+    # Activate Chrome
+    subprocess.run(
+        ['osascript', '-e', 'tell application "Google Chrome" to activate'],
+        capture_output=True,
+    )
+    await asyncio.sleep(0.5)
+
+    # Navigate to the first newly opened tab.
+    # Chrome: Cmd+1…9 (1-indexed). Tabs beyond 8 use Cmd+9 then step back.
+    tab_number = first_new_idx + 1  # 1-indexed
+    if tab_number <= 8:
+        pyautogui.hotkey('command', str(tab_number))
+    else:
+        # Go to last tab, then step left until we reach the first new tab
+        pyautogui.hotkey('command', '9')
+        steps_back = total_tabs - first_new_idx - 1
+        for _ in range(steps_back):
+            pyautogui.hotkey('command', 'shift', '[')
+            await asyncio.sleep(0.05)
+
+    await asyncio.sleep(0.4)
+
+    # Extend selection to cover all new tabs (Ctrl+Shift+Tab = shift-select left in Chrome)
+    for _ in range(num_new_tabs - 1):
+        pyautogui.hotkey('command', 'shift', ']')  # shift-select next tab
+        await asyncio.sleep(0.05)
+
+    await asyncio.sleep(0.3)
+
+    # Fire the tab group shortcut
+    pyautogui.hotkey('ctrl', 'command', 'p')
+    await asyncio.sleep(0.5)
+
+    # Type the task name and confirm
+    pyautogui.write(task_name, interval=0.05)
+    await asyncio.sleep(0.1)
+    pyautogui.press('return')
+    await asyncio.sleep(0.3)
+
+    print(f"[Watchdog] Created tab group: '{task_name}'")
+
+
 async def watchdog_loop(browser: Browser):
     print("[Watchdog] Started monitoring...")
     while True:
@@ -127,15 +180,26 @@ async def watchdog_loop(browser: Browser):
                 if "google.com" in url:
                     print(f"[Watchdog] Trigger detected: {url}. Intervening!")
 
-                    # Fetch the first active task and its associated group URLs
-                    context = await get_urls_for_first_active_task()
-                    if context:
-                        # 1. Manually open the tabs through the urls list
-                        for u in context["urls"]:
-                            print(f"[Watchdog] Opening {u}")
-                            await browser.new_page(url=u)
-                        # 2. Run the agent to ensure all tabs are on the correct page
-                        await run_agent_intervention(browser, context)
+                    # Fetch all active tasks and their associated group URLs
+                    tasks = await get_urls_for_all_active_tasks()
+                    if tasks:
+                        for task in tasks:
+                            # 1. Record tab count before opening this task's tabs
+                            pages_before = await browser.get_pages()
+                            count_before = len(pages_before)
+
+                            # 2. Open all tabs for this task
+                            for u in task["urls"]:
+                                print(f"[Watchdog] Opening {u} for task '{task['task_name']}'")
+                                await browser.new_page(url=u)
+
+                            # 3. Group the newly opened tabs under the task name
+                            pages_after = await browser.get_pages()
+                            num_new = len(pages_after) - count_before
+                            await create_tab_group_for_task(browser, task["task_name"], num_new)
+
+                            # 4. Run the agent to ensure all tabs are on the correct page
+                            await run_agent_intervention(browser, task)
         except Exception as e:
             print(f"[Watchdog] Error in loop: {e}")
 
