@@ -10,12 +10,97 @@ from database import (
     get_group_context,
     check_blacklist,
     get_all_groups,
-    remove_url_from_group
+    remove_url_from_group,
+    get_urls_for_first_active_task,
 )
 from notion_sync import sync_notion_to_db
 
 load_dotenv()
 
+
+LOGIN_URL_INDICATORS = (
+    "login", "signin", "sign-in", "sign_in", "sso", "shibboleth",
+    "auth", "oauth", "accounts.google.com", "cas/login", "idp",
+)
+LOGIN_TITLE_INDICATORS = (
+    "log in", "login", "sign in", "signin", "authenticate",
+    "shibboleth", "sso", "ucsd", "password",
+)
+
+async def _page_needs_login(page) -> bool:
+    """Return True if the page looks like a login page (checks URL and title)."""
+    try:
+        url = await page.get_url()
+        if any(ind in url.lower() for ind in LOGIN_URL_INDICATORS):
+            return True
+        title = await page.get_title()
+        if title and any(ind in title.lower() for ind in LOGIN_TITLE_INDICATORS):
+            return True
+    except Exception:
+        pass
+    return False
+
+async def wait_for_logins_if_needed(browser: Browser):
+    """Check all open pages for login redirects (by URL and page title).
+    If any are found, pause and ask the user to log in manually."""
+    await asyncio.sleep(2)  # let redirects settle
+
+    pages = await browser.get_pages()
+    login_pages = []
+    for page in pages:
+        if await _page_needs_login(page):
+            try:
+                login_pages.append(await page.get_url())
+            except Exception:
+                login_pages.append("<unknown>")
+
+    if login_pages:
+        print("\n[Watchdog] Login required on the following pages:")
+        for u in login_pages:
+            print(f"  {u}")
+        print("[Watchdog] Please log in manually in Chrome, then press Enter here to continue...")
+        await asyncio.to_thread(input, "")
+        print("[Watchdog] Resuming agent...")
+
+
+async def run_agent_intervention(browser: Browser, context: dict):
+    """Runs the AI agent to navigate tabs to their correct destinations."""
+    group_names = ", ".join(g["name"] for g in context["groups"])
+
+    task_prompt = (
+        f"I have opened tabs for task '{context['task_name']}' (id={context['task_id']}) "
+        f"associated with group(s): {group_names}. "
+        "Do not search the web for anything. "
+        "All tabs should now be logged in. For each tab, do the following ONCE and then stop:\n"
+        "1. Navigate to the most specific page for the task (e.g. a specific assignment, "
+        "problem set, repo, or document — not just a homepage). "
+        "Use the CURRENT tab for this navigation — do NOT open a new tab just to navigate.\n"
+        "2. Scan the page. Identify links that are at least 80% related to the task — "
+        "include loosely related content such as hw1, homework 1, PDFs, rubrics, starter code, "
+        "submission instructions, related readings, or anything a student would want open.\n"
+        "3. Open each relevant link by right-clicking and opening in a new tab (or equivalent), "
+        "so the current page stays open. NEVER navigate away from the current page to open a link — "
+        "always open links in NEW tabs. Do NOT create intermediate navigation tabs.\n"
+        "4. If you find no relevant content after one scan, close that tab and move on. "
+        "Do NOT keep searching the same site.\n"
+        "5. Once all starting tabs are processed, STOP. Do not re-scan or open links from the newly opened tabs.\n"
+        "Do NOT complete, submit, or modify any tasks."
+    )
+
+    await wait_for_logins_if_needed(browser)
+
+    async def on_step_end(agent: Agent):
+        await wait_for_logins_if_needed(browser)
+
+    print("[Watchdog] Starting Agent intervention...")
+    agent = Agent(
+        task=task_prompt,
+        browser=browser,
+        llm=ChatBrowserUse(),
+    )
+    await agent.run(max_steps=30, on_step_end=on_step_end)
+    print("[Watchdog] Intervention complete. Sleeping for 5 minutes.")
+    await asyncio.sleep(5) # Cooldown
 
 async def watchdog_loop(browser: Browser):
     print("[Watchdog] Started monitoring...")
@@ -35,33 +120,15 @@ async def watchdog_loop(browser: Browser):
                     if "google.com" in url:
                         print(f"[Watchdog] Trigger detected: {url}. Intervening!")
 
-                        # Fetch the LeetCode group context
-                        context = await get_group_context("LeetCode")
-                        if context:
-                            # 1. Manually open the tabs through the urls list
-                            urls = [u["url"] for u in context.get("urls", [])]
-                            for u in urls:
-                                print(f"[Watchdog] Opening {u}")
-                                await browser.new_page(url=u)
-                            # 2. Run the agent to ensure all tabs are on the correct page
-                            tasks = context.get("tasks", [])
-                            task_names = "\n".join([f"- {t['name']}" for t in tasks])
-                            task_prompt = (
-                                "I have several tabs open for my 'LeetCode' workspace. "
-                                "Please navigate these tabs to the correct problem pages based on the following tasks:\n"
-                                f"{task_names}\n"
-                                "For example, if a task is 'Two Sum', find the corresponding problem page on NeetCode and leave the tab open there. Do NOT solve the problems."
-                            )
-
-                            print("[Watchdog] Starting Agent intervention...")
-                            agent = Agent(
-                                task=task_prompt,
-                                browser=browser,
-                                llm=ChatBrowserUse(),
-                            )
-                            await agent.run()
-                            print("[Watchdog] Intervention complete. Sleeping for 5 seconds.")
-                            await asyncio.sleep(5) # Cooldown
+                    # Fetch the first active task and its associated group URLs
+                    context = await get_urls_for_first_active_task()
+                    if context:
+                        # 1. Manually open the tabs through the urls list
+                        for u in context["urls"]:
+                            print(f"[Watchdog] Opening {u}")
+                            await browser.new_page(url=u)
+                        # 2. Run the agent to ensure all tabs are on the correct page
+                        await run_agent_intervention(browser, context)
         except Exception as e:
             print(f"[Watchdog] Error in loop: {e}")
 
