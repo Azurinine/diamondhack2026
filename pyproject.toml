@@ -11,3 +11,6 @@ dependencies = [
     "notion-client>=2.2.1",
     "python-dotenv>=1.0.1",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

@@ -1,8 +1,11 @@
 import asyncio
 import os
+
+import _ensure_repo_root  # noqa: F401
+
 from dotenv import load_dotenv
-from notion_sync import fetch_notion_tasks, sync_notion_to_db
 from database import get_group_context
+from notion_sync import fetch_notion_tasks, sync_notion_to_db
 
 load_dotenv()
 

@@ -1,4 +1,7 @@
 import asyncio
+
+import _ensure_repo_root  # noqa: F401
+
 from database import (
     init_db,
     add_group,

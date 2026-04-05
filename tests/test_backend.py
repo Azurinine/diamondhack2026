@@ -5,6 +5,9 @@ Run with: python test_backend.py
 import asyncio
 import os
 import tempfile
+
+import _ensure_repo_root  # noqa: F401
+
 import database
 
 # Point the module at a throwaway file for the duration of tests
