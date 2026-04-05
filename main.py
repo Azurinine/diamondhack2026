@@ -8,15 +8,18 @@ from google import genai
 from database import (
     init_db,
     save_urls_to_group,
-    add_group, get_group_context,
+    add_group, 
+    get_group_context,
     check_blacklist,
+    get_all_groups,
+    remove_url_from_group
 )
 from notion_sync import sync_notion_to_db
 
 load_dotenv()
 
 # TODO: Check if url should be blocked (Gemini API)
-async def check_blacklist(url: str) -> bool:
+async def blackout(url: str) -> bool:
     client = genai.Client()
     response = client.models.generate_content(
         model="gemini-flash-latest",
@@ -78,8 +81,10 @@ async def watchdog_loop(browser: Browser):
 
 async def cli_interface(browser: Browser):
     while True:
-        cmd = await asyncio.to_thread(input, "Pilot > ")
-        if cmd == "exit":
+        cmd = await asyncio.to_thread(input, "\033[34mcoolThing > \033[0m")
+        if not cmd:
+            continue
+        if cmd.lower() == "exit":
             break
 
         parts = cmd.strip().split()
@@ -90,13 +95,35 @@ async def cli_interface(browser: Browser):
         arg = parts[1] if len(parts) > 1 else ""
 
         if command == "save":
+            if not arg:
+                print("Usage: save <group> [count]")
+                continue
+            
+            count = None
+            if len(parts) >= 3:
+                try:
+                    count = int(parts[2])
+                except ValueError:
+                    print("Error: Count must be an integer.")
+                    continue
+            
             tabs = await browser.get_tabs()
+            if count is not None and count > 0:
+                # Save the last X tabs (most recent)
+                tabs = tabs[-count:]
+            
             urls = [tab.url for tab in tabs]
             await save_urls_to_group(arg, urls)
             print(f"Saved {len(urls)} tab(s) to group '{arg}'")
 
-        if command == "group":
-            if len(parts) >= 3 and parts[1] == "add":
+        elif command == "group":
+            if not arg or arg == "list":
+                groups = await get_all_groups()
+                print("\n=== Groups ===")
+                for i, g in enumerate(groups, 1):
+                    print(f"  {i}. {g['name']}: {g['description']}")
+                    
+            elif len(parts) >= 3 and parts[1] == "add":
                 name = parts[2]
                 description = " ".join(parts[3:]) if len(parts) > 3 else ""
                 try:
@@ -119,6 +146,79 @@ async def cli_interface(browser: Browser):
                     for t in context['tasks']:
                         print(f"  - {t['name']} (due: {t['due_date'] or 'N/A'}) [{t['source']}]")
 
+        elif command == "url":
+            if len(parts) < 2:
+                print("Usage: url list [group] [--all] | url remove <group> <index/url>")
+                continue
+            
+            action = parts[1]
+            
+            if action == "list":
+                has_all = "--all" in parts
+                # Extract group name if provided (ignoring --all)
+                group_name = next((p for p in parts[2:] if p != "--all"), None)
+                
+                async def print_group_urls(g_name, show_full):
+                    ctx = await get_group_context(g_name)
+                    if not ctx:
+                        print(f"Group '{g_name}' not found.")
+                        return
+                    print(f"\nURLs for {g_name}:")
+                    urls = ctx.get('urls', [])
+                    if not urls:
+                        print("  (No URLs)")
+                    for i, u in enumerate(urls, 1):
+                        display_url = u['url']
+                        if not show_full and len(display_url) > 60:
+                            display_url = display_url[:57] + "..."
+                        flag = " [BLACKLISTED]" if u['is_blacklisted'] else ""
+                        print(f"  {i}. {display_url}{flag}")
+
+                if group_name:
+                    await print_group_urls(group_name, has_all)
+                else:
+                    groups = await get_all_groups()
+                    for idx, g in enumerate(groups):
+                        await print_group_urls(g['name'], has_all)
+                        if idx < len(groups) - 1:
+                            print("-" * 20)
+            
+            elif action == "remove":
+                if len(parts) < 4:
+                    print("Usage: url remove <group> <index/url>")
+                    continue
+                
+                group_name = parts[2]
+                target = parts[3]
+                context = await get_group_context(group_name)
+                if not context:
+                    print(f"Group '{group_name}' not found.")
+                    continue
+                
+                url_list = context.get('urls', [])
+                url_to_remove = target
+                
+                try:
+                    idx = int(target)
+                    if 1 <= idx <= len(url_list):
+                        url_to_remove = url_list[idx-1]['url']
+                except ValueError:
+                    pass
+
+                success = await remove_url_from_group(group_name, url_to_remove)
+                if success:
+                    print(f"Successfully removed {url_to_remove}")
+                    # Show updated list
+                    new_context = await get_group_context(group_name)
+                    print(f"\nUpdated URLs for {group_name}:")
+                    for i, u in enumerate(new_context.get('urls', []), 1):
+                        flag = " [BLACKLISTED]" if u['is_blacklisted'] else ""
+                        print(f"  {i}. {u['url']}{flag}")
+                else:
+                    print(f"Error: Failed to remove {url_to_remove}.")
+            else:
+                print(f"Unknown url action: {action}")
+
         elif command == "audit":
             try:
                 pages = await browser.get_pages()
@@ -129,19 +229,7 @@ async def cli_interface(browser: Browser):
                     print(f"[Audit] {url} → {status}")
             except Exception as e:
                 print(f"[Audit] Error: {e}")
-                print("Usage: group add <name> [description...]")
 
-        elif command == "save":
-            arg = " ".join(parts[1:]) if len(parts) > 1 else ""
-            if not arg:
-                print("Usage: save <group>")
-            else:
-                tabs = await browser.get_tabs()
-                urls = [tab.url for tab in tabs]
-                print(urls)
-                await save_urls_to_group(arg, urls)
-                print(f"Saved {len(urls)} tab(s) to group '{arg}'")
-        
         elif command == "notion-sync":
             if not arg:
                 db_id = os.getenv("NOTION_DATABASE_ID", "")
@@ -166,7 +254,6 @@ async def main():
     )
 
     await browser.start()
-    await browser.navigate_to("https://www.google.com")  # Initial page``
     
     # Run Watchdog and CLI concurrently
     await asyncio.gather(

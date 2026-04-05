@@ -171,6 +171,33 @@ async def save_urls_to_group(group_name, urls: list):
         await db.close()
 
 
+async def remove_url_from_group(group_name: str, url: str) -> bool:
+    """Removes a URL from a group's context. Returns True if successfully removed."""
+    db = await _connect()
+    try:
+        cursor = await db.execute(
+            """
+            SELECT gu.group_id, gu.url_id 
+            FROM Group_URLs gu
+            JOIN Groups g ON g.id = gu.group_id
+            JOIN URLs u ON u.id = gu.url_id
+            WHERE g.name = ? AND u.url = ?
+            """, (group_name, url)
+        )
+        link = await cursor.fetchone()
+        
+        if link:
+            await db.execute(
+                "DELETE FROM Group_URLs WHERE group_id = ? AND url_id = ?",
+                (link["group_id"], link["url_id"])
+            )
+            await db.commit()
+            return True
+        return False
+    finally:
+        await db.close()
+
+
 async def toggle_blacklist(url) -> bool:
     """Flips is_blacklisted for a URL. Returns the new value."""
     db = await _connect()
