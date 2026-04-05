@@ -52,6 +52,8 @@ The Pilot features an interactive command-line interface running concurrently wi
 *   **`url remove <group> <index/url>`**: Unlinks a URL from a group's context using its list index or the URL string.
 
 ### System & Task Tools
+*   **`break [minutes]`**: Pauses the watchdog for a specified duration (default: 5 minutes), allowing you to browse freely without intervention.
+*   **`override [url]`**: Forcefully unblacklists the specified URL (or the currently active tab if no URL is provided). This simulates the behavior of the "Override" popup.
 *   **`audit`**: Manually triggers a check on the current active tab to see if it is classified as a distraction.
 *   **`notion-sync [database_id]`**: Pulls tasks from a connected Notion database.
 *   **`exit`**: Safely shuts down the watchdog and exits.
