@@ -3,8 +3,11 @@ from dotenv import load_dotenv
 #keep this in root repository so it can access the database module and .env file
 # Import your database functions
 # Ensure these match the actual filenames in your directory
-from database import init_db, _connect,save_urls_to_group,blackout
+from database import init_db, _connect,save_urls_to_group
+import _ensure_repo_root  # noqa: F401
+
 load_dotenv()
+
 
 async def verify_database_contents():
     """Helper to print the current state of the URLs table."""
