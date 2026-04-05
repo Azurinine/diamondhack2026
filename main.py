@@ -102,32 +102,69 @@ async def run_agent_intervention(browser: Browser, context: dict):
     print("[Watchdog] Intervention complete. Sleeping for 5 minutes.")
     await asyncio.sleep(5) # Cooldown
 
-async def background_task_intervention(browser: Browser):
-    print("[Watchdog] Preparing intervention window...")
+async def background_task_intervention(main_browser: Browser):
+    show_bg = os.getenv("DEBUG_SHOW_BACKGROUND", "false").lower() == "true"
+    print(f"[Watchdog] Spawning isolated background intervention browser (Visible: {show_bg})...")
+    
+    # Create a completely separate, isolated browser instance just for the agent
+    background_browser = Browser(
+        headless=not show_bg,
+        keep_alive=True, # Prevent tabs from closing automatically when agent stops
+    )
+    
+    final_urls = []
     try:
-        start_url = "https://youtube.com/@3blue1brown/videos"
-        print(f"[Watchdog] Starting agent to navigate to {start_url}...")
+        await background_browser.start()
+        start_url = "https://youtube.com/"
+        print(f"[Watchdog] Background browser started. Directing agent to {start_url}...")
         
         task_prompt = (
-            f"MISSION: "
+            f"MISSION: You are operating in an isolated background environment. "
             f"1. Navigate to {start_url}. "
-            "2. Find the most recently uploaded video. "
-            "3. Click on it so it begins playing. "
-            "4. Once the video page loads, STOP immediately."
+            "2. Find the most recently uploaded video by 3blue1brown and click on it so it begins playing. "
+            "3. Once the video is loading/playing, STOP immediately."
         )
         
         agent = Agent(
             task=task_prompt,
-            browser=browser,
+            browser=background_browser,
             llm=ChatBrowserUse(),
         )
         
         await agent.run(max_steps=10)
         
-        print("[Watchdog] Tab intervention successfully completed!")
+        print("[Watchdog] Agent task complete. Extracting all resulting tabs...")
+        # Brief pause to let any final navigation settle
+        await asyncio.sleep(2) 
+        
+        pages = await background_browser.get_pages()
+        print(f"[Watchdog] Found {len(pages)} raw pages in background.")
+        
+        for i, p in enumerate(pages):
+            url = await p.get_url()
+            print(f"[Watchdog] Debug: Page {i} URL is '{url}'")
+            if url and url not in ("about:blank", "") and url not in final_urls:
+                final_urls.append(url)
+            
+        print(f"[Watchdog] Identified {len(final_urls)} unique tabs to merge.")
         
     except Exception as e:
-        print(f"[Watchdog] Error during intervention: {e}")
+        print(f"[Watchdog] Error during background intervention: {e}")
+        final_urls = []
+    finally:
+        # ALWAYS kill the background browser when done
+        print("[Watchdog] Shutting down background browser...")
+        try:
+            await background_browser.stop()
+        except Exception:
+            pass
+        
+    for url in final_urls:
+        print(f"[Watchdog] Spawning tab in main window: {url}")
+        await main_browser.new_page(url=url)
+    
+    if final_urls:
+        print("[Watchdog] All tabs merged successfully!")
 
 
 
