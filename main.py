@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+import shlex
 from dotenv import load_dotenv
 from browser_use import Agent, Browser, ChatBrowserUse
 from urllib.parse import urlparse
@@ -359,13 +360,18 @@ async def watchdog_loop(browser: Browser):
 
 async def cli_interface(browser: Browser):
     while True:
-        cmd = await asyncio.to_thread(input, "\033[34mcoolThing > \033[0m")
+        cmd = await asyncio.to_thread(input, "\033[34m\nWatchDog > \033[0m")
         if not cmd:
             continue
         if cmd.lower() == "exit":
             break
 
-        parts = cmd.strip().split()
+        try:
+            parts = shlex.split(cmd)
+        except ValueError as e:
+            print(f"Error parsing command: {e}")
+            continue
+            
         if not parts:
             continue
 
@@ -373,14 +379,21 @@ async def cli_interface(browser: Browser):
         arg = parts[1] if len(parts) > 1 else ""
 
         if command == "save":
-            if not arg:
-                print("Usage: save <group> [count]")
+            # Handle 'save [group] <name> [count]'
+            start_idx = 1
+            if len(parts) > 1 and parts[1] == "group":
+                start_idx = 2
+            
+            if len(parts) <= start_idx:
+                print("Usage: save [group] <group_name> [count]")
                 continue
             
+            group_name = parts[start_idx]
+            
             count = None
-            if len(parts) >= 3:
+            if len(parts) > start_idx + 1:
                 try:
-                    count = int(parts[2])
+                    count = int(parts[start_idx + 1])
                 except ValueError:
                     print("Error: Count must be an integer.")
                     continue
@@ -391,8 +404,8 @@ async def cli_interface(browser: Browser):
                 tabs = tabs[-count:]
             
             urls = [tab.url for tab in tabs]
-            await save_urls_to_group(arg, urls)
-            print(f"Saved {len(urls)} tab(s) to group '{arg}'")
+            await save_urls_to_group(group_name, urls)
+            print(f"Saved {len(urls)} tab(s) to group '{group_name}'")
 
         elif command == "group":
             if not arg or arg == "list":
@@ -410,9 +423,11 @@ async def cli_interface(browser: Browser):
                 except Exception as e:
                     print(f"Error adding group: {e}")
             else:
-                context = await get_group_context(arg)
+                # Use shlex-parsed argument (parts[1]) as group name
+                group_name = parts[1]
+                context = await get_group_context(group_name)
                 if not context:
-                    print(f"Group '{arg}' not found.")
+                    print(f"Group '{group_name}' not found.")
                 else:
                     print(f"\n=== Mission Brief: {context['name']} ===")
                     print(f"Description: {context['description']}")
@@ -426,7 +441,7 @@ async def cli_interface(browser: Browser):
 
         elif command == "url":
             if len(parts) < 2:
-                print("Usage: url list [group] [--all] | url remove <group> <index/url>")
+                print("Usage: url list [group] [--all] | url add <group> <url> | url remove <group> <index/url>")
                 continue
             
             action = parts[1]
@@ -460,6 +475,15 @@ async def cli_interface(browser: Browser):
                         await print_group_urls(g['name'], has_all)
                         if idx < len(groups) - 1:
                             print("-" * 20)
+            
+            elif action == "add":
+                if len(parts) < 4:
+                    print("Usage: url add <group> <url>")
+                    continue
+                group_name = parts[2]
+                url = parts[3]
+                await save_urls_to_group(group_name, [url])
+                print(f"Success! Added '{url}' to group '{group_name}'")
             
             elif action == "remove":
                 if len(parts) < 4:
@@ -496,6 +520,7 @@ async def cli_interface(browser: Browser):
                     print(f"Error: Failed to remove {url_to_remove}.")
             else:
                 print(f"Unknown url action: {action}")
+
 
         elif command == "audit":
             try:
@@ -558,6 +583,7 @@ async def main():
     )
 
     await browser.start()
+    await browser.navigate_to("https://google.com")
     
     # Run Watchdog and CLI concurrently
     await asyncio.gather(
