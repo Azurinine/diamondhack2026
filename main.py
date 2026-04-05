@@ -67,8 +67,19 @@ async def wait_for_logins_if_needed(browser: Browser):
 
 async def run_agent_intervention(browser: Browser, context: dict):
     """Runs the AI agent to navigate tabs to their correct destinations."""
+    group_names = ", ".join(g["name"] for g in context["groups"])
 
     task_prompt = (
+        f"MISSION: Act as an expert Chief of Staff preparing a focused deep-work environment for the task: '{context['task_name']}' (ID: {context['task_id']}) "
+        f"associated with the group(s): {group_names}.\n\n"
+
+        "RULES OF ENGAGEMENT:\n"
+        "1. NO WEB SEARCHING: Only use the currently open tabs as your starting points.\n"
+        "2. NO WORK: Never solve, submit, or modify the actual assignment.\n"
+        "3. FORWARD ONLY: Never click 'Back' or re-evaluate a page you have already processed.\n"                                           
+        "4. BLACKLIST CHECK: Before performing STEP 2 on any tab, call is_url_blacklisted with that tab's current URL. "                    
+        "If it returns True, the site is blacklisted — skip STEP 2 entirely, do NOT close this tab, do NOT search this tab for tasks, and move immediately to the next tab.\n\n"  
+
         "EXECUTION PROTOCOL (For each initial tab):\n"
         "STEP 1 - LOCATE: If the current tab is a dashboard/homepage, navigate directly to the specific page for this exact task (e.g., the exact Canvas assignment page or GitHub repo). If already there, proceed to Step 2.\n"
         "STEP 2 - DISCOVER & SPAWN: Once on the specific task page, scan for highly valuable supporting materials. This is the critical step. Look for:\n"
@@ -76,9 +87,8 @@ async def run_agent_intervention(browser: Browser, context: dict):
         "   - Specific PDF readings required for THIS task.\n"
         "   - Rubrics or submission guidelines.\n"
         "   For every valuable material found, extract its URL and open it in a NEW background tab. Do NOT navigate away from the main task page.\n"
-        "STEP 3 - RESTRAINT: You may open up to 4 highly relevant supporting tabs per initial tab. Crucially, DO NOT switch to or scan the new tabs you just created. They are for the user to read later.\n"
-        "STEP 4 - ADVANCE: Close any intermediate tabs you no longer need, ensure the main task page remains open, and move to the next initial tab.\n\n"
-        "When all initial tabs are processed and supporting materials are spawned in the background, STOP."
+        "STEP 3 - RESTRAINT: You may open up to 4 (max 4, does not need to use all 4) highly relevant supporting tabs per initial tab (can have less than 4). Crucially, DO NOT switch to or scan the new tabs you just created. They are for the user to read later.\n"
+        "STEP 4 - ADVANCE: Close any intermediate tabs you no longer need, ensure the main task page remains open, and do NOT delete the original blacklisted site \n\n"
     )
 
     await wait_for_logins_if_needed(browser)
