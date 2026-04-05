@@ -2,7 +2,6 @@ import aiosqlite
 from google import genai
 from dotenv import load_dotenv
 from urllib.parse import urlparse
-import os
 
 load_dotenv()
 
