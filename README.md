@@ -35,6 +35,26 @@ An agentic browser safeguard built for DiamondHacks 2026. Deep Work Pilot is a l
    uv run main.py
    ```
 
+## Demo Mode: CSE 101 Presentation
+
+We have included a specialized "Choreographed Demo" to showcase the Pilot's ability to orchestrate a complex academic environment.
+
+1.  **Seed the Demo Data**:
+    ```bash
+    uv run demo_seed.py
+    ```
+    This creates a "CSE 101" group with an active task "HW1" and seeds Canvas and Overleaf URLs.
+
+2.  **Enable Demo Mode**:
+    Set `DEMO_MODE=True` in your `.env` file.
+
+3.  **Run the Demo**:
+    Launch the Pilot and visit a blacklisted site (e.g., YouTube). When the Watchdog intervenes, the Agent will:
+    *   Navigate Overleaf to your specific "CSE 101 HW1" project.
+    *   Find the most recent lecture in your Canvas Calendar.
+    *   "Infer" a Gemini tutor by opening it in a new tab and submitting a Socratic prompt.
+    *   Open supplementary resource tabs (e.g., VisuAlgo).
+
 ## CLI Command Reference
 
 The Pilot features an interactive command-line interface running concurrently with the watchdog.

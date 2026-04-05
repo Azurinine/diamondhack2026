@@ -323,13 +323,19 @@ async def upsert_inferred_task(group_name, name, due_date=None) -> int:
         await db.close()
 
 
-async def get_urls_for_first_active_task() -> dict | None:
+async def get_urls_for_first_active_task(demo_mode: bool = False) -> dict | None:
     """Find the first active task (by id), resolve its groups and URLs."""
     db = await _connect()
     try:
-        cursor = await db.execute(
-            "SELECT id, name FROM Tasks WHERE is_active = 1 ORDER BY id ASC LIMIT 1"
-        )
+        if demo_mode:
+            # For the demo, we specifically want the CSE101 HW1 task regardless of its active status
+            cursor = await db.execute(
+                "SELECT id, name FROM Tasks WHERE name = 'CSE101 HW1' LIMIT 1"
+            )
+        else:
+            cursor = await db.execute(
+                "SELECT id, name FROM Tasks WHERE is_active = 1 ORDER BY id ASC LIMIT 1"
+            )
         task = await cursor.fetchone()
         if not task:
             return None
