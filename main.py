@@ -2,7 +2,6 @@ import asyncio
 import os
 from dotenv import load_dotenv
 from browser_use import Agent, Browser, ChatBrowserUse
-from google import genai
 
 
 from database import (
