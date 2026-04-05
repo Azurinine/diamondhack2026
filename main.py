@@ -26,21 +26,54 @@ controller = Controller()
 
 @controller.action("Group specific tabs together and label them")
 async def create_tab_group(group_name: str, color: str = "blue", browser_session: BrowserSession = None):
-    # Pass group_name and color as an argument instead of f-string interpolation
-    # to avoid any quoting/escaping issues in the JS string.
-    js_code = """async (params) => {
-        const tabs = await window.chrome.tabs.query({currentWindow: true, highlighted: true});
-        const tabIds = tabs.map(t => t.id);
-        if (tabIds.length > 0) {
-            const groupId = await window.chrome.tabs.group({tabIds: tabIds});
-            await window.chrome.tabGroups.update(groupId, {title: params.group_name, color: params.color});
-            return "Grouped " + tabIds.length + " tabs as '" + params.group_name + "'.";
-        }
-        return "No tabs were highlighted to group.";
-    }"""
-    page = await browser_session.get_current_page()
-    result = await page.evaluate(js_code, {"group_name": group_name, "color": color})
-    return ActionResult(extracted_content=f"Tab group result: {result}")
+    """
+    Groups the currently highlighted/active tabs into a new Chrome tab group on macOS.
+    Uses robust AppleScript to click the macOS Menu Bar natively.
+    """
+    try:
+        print(f"[Tool] Agent requested tab group: '{group_name}'")
+        
+        # 1. Bring Chrome to front and interact with the main macOS Menu Bar
+        # The path is: Tab -> Group Tab (or Group Selected Tab)
+        script = '''
+        tell application "Google Chrome" to activate
+        delay 0.4
+        tell application "System Events"
+            tell process "Google Chrome"
+                set frontmost to true
+                try
+                    click menu item "Group Tab" of menu 1 of menu bar item "Tab" of menu bar 1
+                on error
+                    try
+                        click menu item "Group Selected Tab" of menu 1 of menu bar item "Tab" of menu bar 1
+                    on error
+                        return "ERROR"
+                    end try
+                end try
+            end tell
+        end tell
+        return "SUCCESS"
+        '''
+        
+        result = await asyncio.to_thread(subprocess.run, ['osascript', '-e', script], capture_output=True, text=True)
+        
+        if "ERROR" in result.stdout:
+            print("[Tool] Failed to find the Tab Groups menu item. Make sure Tab Groups are enabled in Chrome.")
+            return ActionResult(error="Failed to open Tab Groups menu.")
+            
+        await asyncio.sleep(0.8) # Wait for the popover animation to finish
+
+        # 2. Type the group name and confirm
+        # The text field is auto-focused and empty when created via the menu, so no Cmd+A is needed.
+        await asyncio.to_thread(pyautogui.write, group_name, interval=0.06)
+        await asyncio.sleep(0.2)
+        await asyncio.to_thread(pyautogui.press, 'return')
+        
+        print(f"[Tool] Tab group creation command sent for '{group_name}'.")
+        return ActionResult(extracted_content=f"Successfully created tab group '{group_name}'")
+    except Exception as e:
+        print(f"[Tool] Error creating tab group: {e}")
+        return ActionResult(error=f"Failed to create tab group: {str(e)}")
 
 
 # TODO: Check if url should be blocked (Gemini API)
@@ -145,54 +178,42 @@ async def run_agent_intervention(browser: Browser, context: dict):
     await asyncio.sleep(5) # Cooldown
 
 async def create_tab_group_for_task(browser: Browser, task_name: str, num_new_tabs: int):
-    """Select newly opened tabs and create a named Chrome tab group using Ctrl+Cmd+P."""
+    """Create a named Chrome tab group using the macOS Menu Bar."""
     if num_new_tabs == 0:
         return
 
-    all_pages = await browser.get_pages()
-    total_tabs = len(all_pages)
-    first_new_idx = total_tabs - num_new_tabs  # 0-based index of first new tab
-
-    # Activate Chrome
-    subprocess.run(
-        ['osascript', '-e', 'tell application "Google Chrome" to activate'],
-        capture_output=True,
-    )
-    await asyncio.sleep(0.5)
-
-    # Navigate to the first newly opened tab.
-    # Chrome: Cmd+1…9 (1-indexed). Tabs beyond 8 use Cmd+9 then step back.
-    tab_number = first_new_idx + 1  # 1-indexed
-    if tab_number <= 8:
-        pyautogui.hotkey('command', str(tab_number))
+    print(f"[Watchdog] Creating tab group '{task_name}' via menu bar...")
+    
+    script = '''
+    tell application "Google Chrome" to activate
+    delay 0.4
+    tell application "System Events"
+        tell process "Google Chrome"
+            set frontmost to true
+            try
+                click menu item "Group Tab" of menu 1 of menu bar item "Tab" of menu bar 1
+            on error
+                try
+                    click menu item "Group Selected Tab" of menu 1 of menu bar item "Tab" of menu bar 1
+                on error
+                    return "ERROR"
+                end try
+            end try
+        end tell
+    end tell
+    return "SUCCESS"
+    '''
+    
+    result = await asyncio.to_thread(subprocess.run, ['osascript', '-e', script], capture_output=True, text=True)
+    
+    if "ERROR" not in result.stdout:
+        await asyncio.sleep(0.8) # Wait for popover animation
+        await asyncio.to_thread(pyautogui.write, task_name, interval=0.06)
+        await asyncio.sleep(0.2)
+        await asyncio.to_thread(pyautogui.press, 'return')
+        print(f"[Watchdog] Created tab group: '{task_name}'")
     else:
-        # Go to last tab, then step left until we reach the first new tab
-        pyautogui.hotkey('command', '9')
-        steps_back = total_tabs - first_new_idx - 1
-        for _ in range(steps_back):
-            pyautogui.hotkey('command', 'shift', '[')
-            await asyncio.sleep(0.05)
-
-    await asyncio.sleep(0.4)
-
-    # Extend selection to cover all new tabs (Ctrl+Shift+Tab = shift-select left in Chrome)
-    for _ in range(num_new_tabs - 1):
-        pyautogui.hotkey('command', 'shift', ']')  # shift-select next tab
-        await asyncio.sleep(0.05)
-
-    await asyncio.sleep(0.3)
-
-    # Fire the tab group shortcut
-    pyautogui.hotkey('ctrl', 'command', 'p')
-    await asyncio.sleep(0.5)
-
-    # Type the task name and confirm
-    pyautogui.write(task_name, interval=0.05)
-    await asyncio.sleep(0.1)
-    pyautogui.press('return')
-    await asyncio.sleep(0.3)
-
-    print(f"[Watchdog] Created tab group: '{task_name}'")
+        print(f"[Watchdog] Failed to create tab group '{task_name}' via menu.")
 
 
 async def watchdog_loop(browser: Browser):
