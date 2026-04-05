@@ -1,11 +1,7 @@
 import aiosqlite
 from google import genai
 from dotenv import load_dotenv
-DB_PATH = "databases/pilot.db"
-
 from urllib.parse import urlparse
-
-load_dotenv()
 
 DB_PATH = "databases/pilot.db"
 
