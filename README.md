@@ -1,6 +1,6 @@
-# Deep Work Pilot
+# Watchdog Pilot
 
-An agentic browser safeguard built for DiamondHacks 2026. Deep Work Pilot is a locally run, AI-powered "Chief of Staff" that monitors your browsing habits, intervenes when you visit blacklisted sites, and automatically sets up specific work environments (Groups) to keep you on task.
+An agentic browser safeguard built for DiamondHacks 2026. Watchdog is a locally run, AI-powered assistant that monitors your browsing habits, intervenes when you visit unproductive sites, and automatically sets up specific work environments to keep you on task.
 
 ## Architecture
 - **Language**: Python 3.13+
@@ -34,6 +34,32 @@ An agentic browser safeguard built for DiamondHacks 2026. Deep Work Pilot is a l
    ```bash
    uv run main.py
    ```
+
+## Notion Sync Setup
+
+To use `notion-sync`, you need three things:
+
+**1. API Key**
+Go to [notion.so/my-integrations](https://www.notion.so/my-integrations) → New integration → copy the token → set as `NOTION_API_KEY` in `.env`
+
+**2. Database structure**
+Your Notion database needs:
+- A **Title** property (task name)
+- A **Select or Multi-Select** property named `Group`, `Category`, `Course`, or `Tag` (used to organize tasks)
+- A **Date** property for due dates (optional)
+
+**3. Share the database with your integration**
+In Notion: open your database → `···` menu → **Connections** → select your integration.
+Without this step the sync returns a 404.
+
+**4. Get your database ID**
+From the URL: `notion.so/workspace/`**`<this-32-char-id>`**`?v=...`
+
+Then run:
+```bash
+notion-sync <database_id>
+# or set NOTION_DATABASE_ID in .env and just run: notion-sync
+```
 
 ## CLI Command Reference
 
