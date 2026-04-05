@@ -1,14 +1,9 @@
 import asyncio
 import os
-import subprocess
-import pyautogui
 # from browser_use import Browser
 from urllib.parse import urlparse
 from dotenv import load_dotenv
-from browser_use import Agent, Browser, ChatBrowserUse, Controller
-from browser_use.agent.views import ActionResult
-from browser_use.browser.session import BrowserSession
-from google import genai
+from browser_use import Agent, Browser, ChatBrowserUse
 
 
 from database import (
@@ -16,105 +11,12 @@ from database import (
     save_urls_to_group,
     add_group, get_group_context,
     check_blacklist,
-    get_urls_for_all_active_tasks,
+    get_urls_for_first_active_task,
 )
 from notion_sync import sync_notion_to_db
 
 load_dotenv()
 
-controller = Controller()
-
-@controller.action("Group specific tabs together and label them")
-async def create_tab_group(group_name: str, color: str = "blue", browser_session: BrowserSession = None):
-    """
-    Groups the currently highlighted/active tabs into a new Chrome tab group on macOS.
-    Uses robust AppleScript to click the macOS Menu Bar natively.
-    """
-    try:
-        print(f"[Tool] Agent requested tab group: '{group_name}'")
-        
-        target_url = ""
-        if browser_session:
-            try:
-                target_url = await browser_session.get_current_page_url()
-            except Exception as e:
-                print(f"[Tool] Could not get URL from session: {e}")
-        
-        target_url_safe = target_url.replace('"', '\\"') if target_url else ""
-        
-        # 1. Bring Chrome to front and interact with the main macOS Menu Bar
-        # The path is: Tab -> Group Tab (or Group Selected Tab)
-        script = f'''
-        tell application "Google Chrome"
-            set targetUrl to "{target_url_safe}"
-            set windowFound to false
-            if targetUrl is not "" then
-                repeat with w in windows
-                    set tabIndex to 1
-                    repeat with t in tabs of w
-                        try
-                            if URL of t contains targetUrl or targetUrl contains URL of t then
-                                set active tab index of w to tabIndex
-                                set index of w to 1
-                                set windowFound to true
-                                exit repeat
-                            end if
-                        end try
-                        set tabIndex to tabIndex + 1
-                    end repeat
-                    if windowFound then exit repeat
-                end repeat
-            end if
-            activate
-        end tell
-        delay 0.4
-        tell application "System Events"
-            tell process "Google Chrome"
-                set frontmost to true
-                try
-                    click menu item "Group Tab" of menu 1 of menu bar item "Tab" of menu bar 1
-                on error
-                    try
-                        click menu item "Group Selected Tab" of menu 1 of menu bar item "Tab" of menu bar 1
-                    on error
-                        return "ERROR"
-                    end try
-                end try
-            end tell
-        end tell
-        return "SUCCESS"
-        '''
-        
-        result = await asyncio.to_thread(subprocess.run, ['osascript', '-e', script], capture_output=True, text=True)
-        
-        if "ERROR" in result.stdout:
-            print("[Tool] Failed to find the Tab Groups menu item. Make sure Tab Groups are enabled in Chrome.")
-            return ActionResult(error="Failed to open Tab Groups menu.")
-            
-        await asyncio.sleep(0.8) # Wait for the popover animation to finish
-
-        # 2. Type the group name and confirm
-        # The text field is auto-focused and empty when created via the menu, so no Cmd+A is needed.
-        await asyncio.to_thread(pyautogui.write, group_name, interval=0.06)
-        await asyncio.sleep(0.2)
-        await asyncio.to_thread(pyautogui.press, 'return')
-        
-        print(f"[Tool] Tab group creation command sent for '{group_name}'.")
-        return ActionResult(extracted_content=f"Successfully created tab group '{group_name}'")
-    except Exception as e:
-        print(f"[Tool] Error creating tab group: {e}")
-        return ActionResult(error=f"Failed to create tab group: {str(e)}")
-
-
-# TODO: Check if url should be blocked (Gemini API)
-async def check_blacklist(url: str) -> bool:
-    client = genai.Client()
-    response = client.models.generate_content(
-        model="gemini-flash-latest",
-        contents=f"Check if this domain would ever be detrimental to schoolwork, be more harsh when deciding detrimentalness: {url},respond with only 'Yes' or 'No'."
-    )
-    valid = response.text.strip().lower() == "yes"
-    return valid
 
 LOGIN_URL_INDICATORS = (
     "login", "signin", "sign-in", "sign_in", "sso", "shibboleth",
@@ -166,30 +68,17 @@ async def run_agent_intervention(browser: Browser, context: dict):
     group_names = ", ".join(g["name"] for g in context["groups"])
 
     task_prompt = (
-        "Create a tab group named e using create_tab_group"
+        "EXECUTION PROTOCOL (For each initial tab):\n"
+        "STEP 1 - LOCATE: If the current tab is a dashboard/homepage, navigate directly to the specific page for this exact task (e.g., the exact Canvas assignment page or GitHub repo). If already there, proceed to Step 2.\n"
+        "STEP 2 - DISCOVER & SPAWN: Once on the specific task page, scan for highly valuable supporting materials. This is the critical step. Look for:\n"
+        "   - Starter code or repositories.\n"
+        "   - Specific PDF readings required for THIS task.\n"
+        "   - Rubrics or submission guidelines.\n"
+        "   For every valuable material found, extract its URL and open it in a NEW background tab. Do NOT navigate away from the main task page.\n"
+        "STEP 3 - RESTRAINT: You may open up to 4 highly relevant supporting tabs per initial tab. Crucially, DO NOT switch to or scan the new tabs you just created. They are for the user to read later.\n"
+        "STEP 4 - ADVANCE: Close any intermediate tabs you no longer need, ensure the main task page remains open, and move to the next initial tab.\n\n"
+        "When all initial tabs are processed and supporting materials are spawned in the background, STOP."
     )
-
-    # task_prompt = (
-    #     f"MISSION: Act as an expert Chief of Staff preparing a focused deep-work environment for the task: '{context['task_name']}' (ID: {context['task_id']}) "
-    #     f"associated with the group(s): {group_names}.\n\n"
-        
-    #     "RULES OF ENGAGEMENT:\n"
-    #     "1. NO WEB SEARCHING: Only use the currently open tabs as your starting points.\n"
-    #     "2. NO WORK: Never solve, submit, or modify the actual assignment.\n"
-    #     "3. FORWARD ONLY: Never click 'Back' or re-evaluate a page you have already processed.\n\n"
-        
-    #     "EXECUTION PROTOCOL (For each initial tab):\n"
-    #     "STEP 1 - LOCATE: If the current tab is a dashboard/homepage, navigate directly to the specific page for this exact task (e.g., the exact Canvas assignment page or GitHub repo). If already there, proceed to Step 2.\n"
-    #     "STEP 2 - DISCOVER & SPAWN: Once on the specific task page, scan for highly valuable supporting materials. This is the critical step. Look for:\n"
-    #     "   - Starter code or repositories.\n"
-    #     "   - Specific PDF readings required for THIS task.\n"
-    #     "   - Rubrics or submission guidelines.\n"
-    #     "   For every valuable material found, extract its URL and open it in a NEW background tab. Do NOT navigate away from the main task page.\n"
-    #     "STEP 3 - RESTRAINT: You may open up to 4 highly relevant supporting tabs per initial tab (can have less than 4). Crucially, DO NOT switch to or scan the new tabs you just created. They are for the user to read later.\n"
-    #     "STEP 4 - ADVANCE: Close any intermediate tabs you no longer need, ensure the main task page remains open, and move to the next initial tab.\n\n"
-    #     "When all initial tabs are processed and supporting materials are spawned in the background, "
-    #     f"call create_tab_group with group_name='{context['task_name']}' to label all the tabs under one group. Then STOP."
-    # )
 
     await wait_for_logins_if_needed(browser)
 
@@ -200,81 +89,11 @@ async def run_agent_intervention(browser: Browser, context: dict):
     agent = Agent(
         task=task_prompt,
         browser=browser,
-        controller=controller,
         llm=ChatBrowserUse(),
     )
     await agent.run(max_steps=30, on_step_end=on_step_end)
     print("[Watchdog] Intervention complete. Sleeping for 5 minutes.")
     await asyncio.sleep(5) # Cooldown
-
-async def create_tab_group_for_task(browser: Browser, task_name: str, num_new_tabs: int):
-    """Create a named Chrome tab group using the macOS Menu Bar."""
-    if num_new_tabs == 0:
-        return
-
-    print(f"[Watchdog] Creating tab group '{task_name}' via menu bar...")
-    
-    target_url = ""
-    try:
-        pages = await browser.get_pages()
-        if pages:
-            target_url = await pages[-1].get_url()
-    except Exception as e:
-        print(f"[Watchdog] Could not get URL: {e}")
-        
-    target_url_safe = target_url.replace('"', '\\"') if target_url else ""
-    
-    script = f'''
-    tell application "Google Chrome"
-        set targetUrl to "{target_url_safe}"
-        set windowFound to false
-        if targetUrl is not "" then
-            repeat with w in windows
-                set tabIndex to 1
-                repeat with t in tabs of w
-                    try
-                        if URL of t contains targetUrl or targetUrl contains URL of t then
-                            set active tab index of w to tabIndex
-                            set index of w to 1
-                            set windowFound to true
-                            exit repeat
-                        end if
-                    end try
-                    set tabIndex to tabIndex + 1
-                end repeat
-                if windowFound then exit repeat
-            end repeat
-        end if
-        activate
-    end tell
-    delay 0.4
-    tell application "System Events"
-        tell process "Google Chrome"
-            set frontmost to true
-            try
-                click menu item "Group Tab" of menu 1 of menu bar item "Tab" of menu bar 1
-            on error
-                try
-                    click menu item "Group Selected Tab" of menu 1 of menu bar item "Tab" of menu bar 1
-                on error
-                    return "ERROR"
-                end try
-            end try
-        end tell
-    end tell
-    return "SUCCESS"
-    '''
-    
-    result = await asyncio.to_thread(subprocess.run, ['osascript', '-e', script], capture_output=True, text=True)
-    
-    if "ERROR" not in result.stdout:
-        await asyncio.sleep(0.8) # Wait for popover animation
-        await asyncio.to_thread(pyautogui.write, task_name, interval=0.06)
-        await asyncio.sleep(0.2)
-        await asyncio.to_thread(pyautogui.press, 'return')
-        print(f"[Watchdog] Created tab group: '{task_name}'")
-    else:
-        print(f"[Watchdog] Failed to create tab group '{task_name}' via menu.")
 
 
 async def watchdog_loop(browser: Browser):
@@ -291,26 +110,15 @@ async def watchdog_loop(browser: Browser):
                 if "google.com" in url:
                     print(f"[Watchdog] Trigger detected: {url}. Intervening!")
 
-                    # Fetch all active tasks and their associated group URLs
-                    tasks = await get_urls_for_all_active_tasks()
-                    if tasks:
-                        for task in tasks:
-                            # 1. Record tab count before opening this task's tabs
-                            pages_before = await browser.get_pages()
-                            count_before = len(pages_before)
-
-                            # 2. Open all tabs for this task
-                            for u in task["urls"]:
-                                print(f"[Watchdog] Opening {u} for task '{task['task_name']}'")
-                                await browser.new_page(url=u)
-
-                            # 3. Group the newly opened tabs under the task name
-                            pages_after = await browser.get_pages()
-                            num_new = len(pages_after) - count_before
-                            await create_tab_group_for_task(browser, task["task_name"], num_new)
-
-                            # 4. Run the agent to ensure all tabs are on the correct page
-                            await run_agent_intervention(browser, task)
+                    # Fetch the first active task and its associated group URLs
+                    context = await get_urls_for_first_active_task()
+                    if context:
+                        # 1. Manually open the tabs through the urls list
+                        for u in context["urls"]:
+                            print(f"[Watchdog] Opening {u}")
+                            await browser.new_page(url=u)
+                        # 2. Run the agent to ensure all tabs are on the correct page
+                        await run_agent_intervention(browser, context)
         except Exception as e:
             print(f"[Watchdog] Error in loop: {e}")
 

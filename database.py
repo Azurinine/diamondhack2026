@@ -210,39 +210,40 @@ async def upsert_inferred_task(group_name, name, due_date=None) -> int:
         await db.close()
 
 
-async def get_urls_for_all_active_tasks() -> list[dict]:
-    """Return every active task (ordered by id) with its groups and non-blacklisted URLs."""
+async def get_urls_for_first_active_task() -> dict | None:
+    """Find the first active task (by id), resolve its groups and URLs."""
     db = await _connect()
     try:
         cursor = await db.execute(
-            "SELECT id, name FROM Tasks WHERE is_active = 1 ORDER BY id ASC"
+            "SELECT id, name FROM Tasks WHERE is_active = 1 ORDER BY id ASC LIMIT 1"
         )
-        tasks = [dict(r) for r in await cursor.fetchall()]
-        result = []
-        for task in tasks:
+        task = await cursor.fetchone()
+        if not task:
+            return None
+        task = dict(task)
+
+        cursor = await db.execute("""
+            SELECT g.id, g.name FROM Groups g
+            JOIN Task_Groups tg ON g.id = tg.group_id
+            WHERE tg.task_id = ?
+        """, (task["id"],))
+        groups = [dict(r) for r in await cursor.fetchall()]
+
+        urls = []
+        for group in groups:
             cursor = await db.execute("""
-                SELECT g.id, g.name FROM Groups g
-                JOIN Task_Groups tg ON g.id = tg.group_id
-                WHERE tg.task_id = ?
-            """, (task["id"],))
-            groups = [dict(r) for r in await cursor.fetchall()]
+                SELECT u.url FROM URLs u
+                JOIN Group_URLs gu ON u.id = gu.url_id
+                WHERE gu.group_id = ? AND u.is_blacklisted = 0
+            """, (group["id"],))
+            urls.extend(row["url"] for row in await cursor.fetchall())
 
-            urls = []
-            for group in groups:
-                cursor = await db.execute("""
-                    SELECT u.url FROM URLs u
-                    JOIN Group_URLs gu ON u.id = gu.url_id
-                    WHERE gu.group_id = ? AND u.is_blacklisted = 0
-                """, (group["id"],))
-                urls.extend(row["url"] for row in await cursor.fetchall())
-
-            result.append({
-                "task_id": task["id"],
-                "task_name": task["name"],
-                "groups": groups,
-                "urls": urls,
-            })
-        return result
+        return {
+            "task_id": task["id"],
+            "task_name": task["name"],
+            "groups": groups,
+            "urls": urls,
+        }
     finally:
         await db.close()
 

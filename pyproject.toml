@@ -9,6 +9,5 @@ dependencies = [
     "browser-use==0.12.6",
     "langchain-google-genai>=2.0.9",
     "notion-client>=2.2.1",
-    "pyautogui>=0.9.54",
     "python-dotenv>=1.0.1",
 ]
