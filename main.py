@@ -78,23 +78,24 @@ async def run_agent_intervention(browser: Browser, context: dict):
     group_names = ", ".join(g["name"] for g in context["groups"])
 
     task_prompt = (
-        f"I have opened tabs for task '{context['task_name']}' (id={context['task_id']}) "
-        f"associated with group(s): {group_names}. "
-        "Do not search the web for anything."
-        "All tabs should now be logged in. For each tab, do the following ONCE and then stop:\n"
-        "1. Navigate to the most specific page for the task (e.g. a specific assignment, "
-        "problem set, repo, or document — not just a homepage). "
-        "Use the CURRENT tab for this navigation — do NOT open a new tab just to navigate.\n"
-        "2. Scan the page. Identify links that are at least 80% related to the task — if already in a document, do not open additional links"
-        "include loosely related content such as hw1, homework 1, PDFs, rubrics, starter code, "
-        "submission instructions, related readings, or anything a student would want open.\n"
-        "3. Open each relevant link by right-clicking and opening in a new tab (or equivalent), "
-        "so the current page stays open. NEVER navigate away from the current page to open a link — "
-        "always open links in NEW tabs. Do NOT create intermediate navigation tabs.\n"
-        "4. If you find no relevant content after one scan, close that tab and move on. "
-        "Do NOT keep searching the same site.\n"
-        "5. Once all starting tabs are processed, STOP. Do not re-scan or open links from the newly opened tabs.\n"
-        "Do NOT complete, submit, or modify any tasks."
+        f"MISSION: Act as an expert Chief of Staff preparing a focused deep-work environment for the task: '{context['task_name']}' (ID: {context['task_id']}) "
+        f"associated with the group(s): {group_names}.\n\n"
+        
+        "RULES OF ENGAGEMENT:\n"
+        "1. NO WEB SEARCHING: Only use the currently open tabs as your starting points.\n"
+        "2. NO WORK: Never solve, submit, or modify the actual assignment.\n"
+        "3. FORWARD ONLY: Never click 'Back' or re-evaluate a page you have already processed.\n\n"
+        
+        "EXECUTION PROTOCOL (For each initial tab):\n"
+        "STEP 1 - LOCATE: If the current tab is a dashboard/homepage, navigate directly to the specific page for this exact task (e.g., the exact Canvas assignment page or GitHub repo). If already there, proceed to Step 2.\n"
+        "STEP 2 - DISCOVER & SPAWN: Once on the specific task page, scan for highly valuable supporting materials. This is the critical step. Look for:\n"
+        "   - Starter code or repositories.\n"
+        "   - Specific PDF readings required for THIS task.\n"
+        "   - Rubrics or submission guidelines.\n"
+        "   For every valuable material found, extract its URL and open it in a NEW background tab. Do NOT navigate away from the main task page.\n"
+        "STEP 3 - RESTRAINT: You may open up to 4 highly relevant supporting tabs per initial tab. Crucially, DO NOT switch to or scan the new tabs you just created. They are for the user to read later.\n"
+        "STEP 4 - ADVANCE: Close any intermediate tabs you no longer need, ensure the main task page remains open, and move to the next initial tab.\n\n"
+        "When all initial tabs are processed and supporting materials are spawned in the background, STOP."
     )
 
     await wait_for_logins_if_needed(browser)
