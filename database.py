@@ -26,6 +26,21 @@ async def init_db():
             columns = [row[1] for row in await cursor.fetchall()]
             if "domain" not in columns:
                 await db.execute("ALTER TABLE URLs ADD COLUMN domain TEXT")
+                await db.commit()
+            
+            # Backfill domains for all existing URLs
+            cursor = await db.execute("SELECT id, url FROM URLs WHERE domain IS NULL OR domain = ''")
+            rows = await cursor.fetchall()
+            for row in rows:
+                url_id, url = row[0], row[1]
+                try:
+                    parsed_url = urlparse(url)
+                    domain = parsed_url.netloc
+                    if domain.startswith("www."):
+                        domain = domain[4:]
+                    await db.execute("UPDATE URLs SET domain = ? WHERE id = ?", (domain, url_id))
+                except Exception:
+                    pass
         except Exception as e:
             print(f"Migration error: {e}")
 
