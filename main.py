@@ -102,6 +102,35 @@ async def run_agent_intervention(browser: Browser, context: dict):
     print("[Watchdog] Intervention complete. Sleeping for 5 minutes.")
     await asyncio.sleep(5) # Cooldown
 
+async def background_task_intervention(browser: Browser):
+    print("[Watchdog] Preparing intervention window...")
+    try:
+        start_url = "https://youtube.com/@3blue1brown/videos"
+        print(f"[Watchdog] Starting agent to navigate to {start_url}...")
+        
+        task_prompt = (
+            f"MISSION: "
+            f"1. Navigate to {start_url}. "
+            "2. Find the most recently uploaded video. "
+            "3. Click on it so it begins playing. "
+            "4. Once the video page loads, STOP immediately."
+        )
+        
+        agent = Agent(
+            task=task_prompt,
+            browser=browser,
+            llm=ChatBrowserUse(),
+        )
+        
+        await agent.run(max_steps=10)
+        
+        print("[Watchdog] Tab intervention successfully completed!")
+        
+    except Exception as e:
+        print(f"[Watchdog] Error during intervention: {e}")
+
+
+
 async def watchdog_loop(browser: Browser):
     print("[Watchdog] Started monitoring...")
     last_url = None
@@ -113,22 +142,28 @@ async def watchdog_loop(browser: Browser):
                 current_page = pages[0]
                 url = await current_page.get_url()
 
-                if url and url != last_url:
-                    last_url = url
-                    
-                    # Trigger condition: URL contains "google.com"
-                    if "google.com" in url:
-                        print(f"[Watchdog] Trigger detected: {url}. Intervening!")
+            if url and url != last_url:
+                last_url = url
+                
+                # Trigger condition: URL contains "google.com"
+                if "googlIO.com" not in url:
+                    break
+                
+                print(f"[Watchdog] Trigger detected: {url}. Intervening!")
 
-                    # Fetch the first active task and its associated group URLs
-                    context = await get_urls_for_first_active_task()
-                    if context:
-                        # 1. Manually open the tabs through the urls list
-                        for u in context["urls"]:
-                            print(f"[Watchdog] Opening {u}")
-                            await browser.new_page(url=u)
-                        # 2. Run the agent to ensure all tabs are on the correct page
-                        await run_agent_intervention(browser, context)
+
+                # Fetch the first active task and its associated group URLs
+                context = await get_urls_for_first_active_task()
+                if context:
+                    # 1. Manually open the tabs through the urls list
+                    for u in context["urls"]:
+                        print(f"[Watchdog] Opening {u}")
+                        await browser.new_page(url=u)
+                    # 2. Run the agent to ensure all tabs are on the correct page
+                    # await run_agent_intervention(browser, context) TODO COMMENTED OUT FOR NOW
+                    # await background_task_intervention(browser)
+
+
         except Exception as e:
             print(f"[Watchdog] Error in loop: {e}")
 
@@ -286,6 +321,10 @@ async def cli_interface(browser: Browser):
             except Exception as e:
                 print(f"[Audit] Error: {e}")
 
+        elif command == "test-bg":
+            print("[Pilot] Triggering background task intervention test...")
+            await background_task_intervention(browser)
+            
         elif command == "notion-sync":
             if not arg:
                 db_id = os.getenv("NOTION_DATABASE_ID", "")
