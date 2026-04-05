@@ -12,6 +12,7 @@ from database import (
     save_urls_to_group,
     add_group, get_group_context,
     check_blacklist,
+    get_urls_for_first_active_task,
 )
 from notion_sync import sync_notion_to_db
 
@@ -27,6 +28,58 @@ async def check_blacklist(url: str) -> bool:
     valid = response.text.strip().lower() == "yes"
     return valid
 
+LOGIN_INDICATORS = (
+    "login", "signin", "sign-in", "sign_in", "sso", "shibboleth",
+    "auth", "oauth", "accounts.google.com", "cas/login", "idp",
+)
+
+async def wait_for_logins_if_needed(browser: Browser):
+    """Check all open pages for login redirects. If any are found, pause and
+    ask the user to log in manually, then wait for them to press Enter."""
+    await asyncio.sleep(2)  # let redirects settle
+
+    pages = await browser.get_pages()
+    login_pages = []
+    for page in pages:
+        try:
+            url = await page.get_url()
+            if any(ind in url.lower() for ind in LOGIN_INDICATORS):
+                login_pages.append(url)
+        except Exception:
+            pass
+
+    if login_pages:
+        print("\n[Watchdog] Login required on the following pages:")
+        for u in login_pages:
+            print(f"  {u}")
+        print("[Watchdog] Please log in manually in Chrome, then press Enter here to continue...")
+        await asyncio.to_thread(input, "")
+        print("[Watchdog] Resuming agent...")
+
+
+async def run_agent_intervention(browser: Browser, context: dict):
+    """Runs the AI agent to navigate tabs to their correct destinations."""
+    group_names = ", ".join(g["name"] for g in context["groups"])
+
+    task_prompt = (
+        f"I have opened tabs for task '{context['task_name']}' (id={context['task_id']}) "
+        f"associated with group(s): {group_names}. "
+        "All tabs should now be logged in. Navigate each tab to its correct destination "
+        "based on the task. Do NOT complete the tasks themselves."
+    )
+
+    await wait_for_logins_if_needed(browser)
+
+    print("[Watchdog] Starting Agent intervention...")
+    agent = Agent(
+        task=task_prompt,
+        browser=browser,
+        llm=ChatBrowserUse(),
+    )
+    await agent.run()
+    print("[Watchdog] Intervention complete. Sleeping for 5 minutes.")
+    await asyncio.sleep(5) # Cooldown
+
 async def watchdog_loop(browser: Browser):
     print("[Watchdog] Started monitoring...")
     while True:
@@ -41,33 +94,15 @@ async def watchdog_loop(browser: Browser):
                 if "google.com" in url:
                     print(f"[Watchdog] Trigger detected: {url}. Intervening!")
 
-                    # Fetch the LeetCode group context
-                    context = await get_group_context("LeetCode")
+                    # Fetch the first active task and its associated group URLs
+                    context = await get_urls_for_first_active_task()
                     if context:
                         # 1. Manually open the tabs through the urls list
-                        urls = [u["url"] for u in context.get("urls", [])]
-                        for u in urls:
+                        for u in context["urls"]:
                             print(f"[Watchdog] Opening {u}")
                             await browser.new_page(url=u)
                         # 2. Run the agent to ensure all tabs are on the correct page
-                        tasks = context.get("tasks", [])
-                        task_names = "\n".join([f"- {t['name']}" for t in tasks])
-                        task_prompt = (
-                            "I have several tabs open for my 'LeetCode' workspace. "
-                            "Please navigate these tabs to the correct problem pages based on the following tasks:\n"
-                            f"{task_names}\n"
-                            "For example, if a task is 'Two Sum', find the corresponding problem page on NeetCode and leave the tab open there. Do NOT solve the problems."
-                        )
-
-                        print("[Watchdog] Starting Agent intervention...")
-                        agent = Agent(
-                            task=task_prompt,
-                            browser=browser,
-                            llm=ChatBrowserUse(),
-                        )
-                        await agent.run()
-                        print("[Watchdog] Intervention complete. Sleeping for 5 minutes.")
-                        await asyncio.sleep(5) # Cooldown
+                        await run_agent_intervention(browser, context)
         except Exception as e:
             print(f"[Watchdog] Error in loop: {e}")
 
@@ -163,12 +198,13 @@ async def main():
     )
 
     await browser.start()
-    await browser.navigate_to("https://www.google.com")  # Initial page``
+    #await browser.navigate_to("https://www.google.com")  # Initial page``
     
     # Run Watchdog and CLI concurrently
     await asyncio.gather(
         watchdog_loop(browser),
         cli_interface(browser)
+    )
 
     await browser.stop()
 
