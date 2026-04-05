@@ -54,9 +54,9 @@ async def seed():
         "https://www.instagram.com"
     ])
     # Then toggle their blacklist status to True
-    await toggle_blacklist("https://www.youtube.com")
-    await toggle_blacklist("https://www.facebook.com")
-    await toggle_blacklist("https://www.instagram.com")
+    # await toggle_blacklist("https://www.youtube.com")
+    # await toggle_blacklist("https://www.facebook.com")
+    # await toggle_blacklist("https://www.instagram.com")
 
     print("\nDatabase successfully seeded with dummy variables!")
 
