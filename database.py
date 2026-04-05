@@ -1,6 +1,8 @@
 import aiosqlite
 
-DB_PATH = "pilot.db"
+from urllib.parse import urlparse
+
+DB_PATH = "databases/pilot.db"
 
 
 async def _connect():
@@ -17,10 +19,21 @@ async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         with open("databases/schema.sql", "r") as f:
             await db.executescript(f.read())
+
+        # Migration: Add domain column to URLs table if it doesn't exist
+        try:
+            cursor = await db.execute("PRAGMA table_info(URLs)")
+            columns = [row[1] for row in await cursor.fetchall()]
+            if "domain" not in columns:
+                await db.execute("ALTER TABLE URLs ADD COLUMN domain TEXT")
+        except Exception as e:
+            print(f"Migration error: {e}")
+
         await db.commit()
 
 
 # ── Part 2: Group & Workspace ─────────────────────────────────────────────────
+
 
 async def add_group(name, description="") -> int:
     db = await _connect()
@@ -113,8 +126,24 @@ async def save_urls_to_group(group_name, urls: list):
             return
         group_id = group["id"]
 
+
+
         for url in urls:
-            await db.execute("INSERT OR IGNORE INTO URLs (url) VALUES (?)", (url,))
+            # Extract domain from URL
+            domain = ""
+            try:
+                parsed_url = urlparse(url)
+                domain = parsed_url.netloc
+                if domain.startswith("www."):
+                    domain = domain[4:] # Remove www. prefix for cleaner grouping
+            except Exception:
+                pass
+                
+            await db.execute("INSERT OR IGNORE INTO URLs (url, domain) VALUES (?, ?)", (url, domain))
+            
+            # If the URL already existed but didn't have a domain, let's backfill it
+            await db.execute("UPDATE URLs SET domain = ? WHERE url = ? AND (domain IS NULL OR domain = '')", (domain, url))
+            
             cursor = await db.execute("SELECT id FROM URLs WHERE url = ?", (url,))
             url_row = await cursor.fetchone()
             await db.execute(
