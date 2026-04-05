@@ -3,6 +3,10 @@ from google import genai
 from dotenv import load_dotenv
 DB_PATH = "databases/pilot.db"
 
+from urllib.parse import urlparse
+
+DB_PATH = "databases/pilot.db"
+
 load_dotenv()
 
 async def _connect():
@@ -19,10 +23,36 @@ async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         with open("databases/schema.sql", "r") as f:
             await db.executescript(f.read())
+
+        # Migration: Add domain column to URLs table if it doesn't exist
+        try:
+            cursor = await db.execute("PRAGMA table_info(URLs)")
+            columns = [row[1] for row in await cursor.fetchall()]
+            if "domain" not in columns:
+                await db.execute("ALTER TABLE URLs ADD COLUMN domain TEXT")
+                await db.commit()
+            
+            # Backfill domains for all existing URLs
+            cursor = await db.execute("SELECT id, url FROM URLs WHERE domain IS NULL OR domain = ''")
+            rows = await cursor.fetchall()
+            for row in rows:
+                url_id, url = row[0], row[1]
+                try:
+                    parsed_url = urlparse(url)
+                    domain = parsed_url.netloc
+                    if domain.startswith("www."):
+                        domain = domain[4:]
+                    await db.execute("UPDATE URLs SET domain = ? WHERE id = ?", (domain, url_id))
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"Migration error: {e}")
+
         await db.commit()
 
 
 # ── Part 2: Group & Workspace ─────────────────────────────────────────────────
+
 
 async def add_group(name, description="") -> int:
     db = await _connect()
@@ -124,7 +154,24 @@ async def save_urls_to_group(group_name, urls: list):
             return
         group_id = group["id"]
 
+
+
         for url in urls:
+            # Extract domain from URL
+            domain = ""
+            try:
+                parsed_url = urlparse(url)
+                domain = parsed_url.netloc
+                if domain.startswith("www."):
+                    domain = domain[4:] # Remove www. prefix for cleaner grouping
+            except Exception:
+                pass
+                
+            await db.execute("INSERT OR IGNORE INTO URLs (url, domain) VALUES (?, ?)", (url, domain))
+            
+            # If the URL already existed but didn't have a domain, let's backfill it
+            await db.execute("UPDATE URLs SET domain = ? WHERE url = ? AND (domain IS NULL OR domain = '')", (domain, url))
+            
             cursor = await db.execute("SELECT id FROM URLs WHERE url = ?", (url,))
             url_row = await cursor.fetchone()
             if not url_row:

@@ -18,6 +18,7 @@ load_dotenv()
 
 async def watchdog_loop(browser: Browser):
     print("[Watchdog] Started monitoring...")
+    last_url = None
     while True:
         try:
             # Polling logic: Retrieve current URL
@@ -26,41 +27,45 @@ async def watchdog_loop(browser: Browser):
                 current_page = pages[0]
                 url = await current_page.get_url()
 
-                # Trigger condition: URL contains "google.com" or "neetcode.io"
-                if "google.com" in url:
-                    print(f"[Watchdog] Trigger detected: {url}. Intervening!")
+                if url and url != last_url:
+                    last_url = url
+                    
+                    # Trigger condition: URL contains "google.com"
+                    if "google.com" in url:
+                        print(f"[Watchdog] Trigger detected: {url}. Intervening!")
 
-                    # Fetch the LeetCode group context
-                    context = await get_group_context("LeetCode")
-                    if context:
-                        # 1. Manually open the tabs through the urls list
-                        urls = [u["url"] for u in context.get("urls", [])]
-                        for u in urls:
-                            print(f"[Watchdog] Opening {u}")
-                            await browser.new_page(url=u)
-                        # 2. Run the agent to ensure all tabs are on the correct page
-                        tasks = context.get("tasks", [])
-                        task_names = "\n".join([f"- {t['name']}" for t in tasks])
-                        task_prompt = (
-                            "I have several tabs open for my 'LeetCode' workspace. "
-                            "Please navigate these tabs to the correct problem pages based on the following tasks:\n"
-                            f"{task_names}\n"
-                            "For example, if a task is 'Two Sum', find the corresponding problem page on NeetCode and leave the tab open there. Do NOT solve the problems."
-                        )
+                        # Fetch the LeetCode group context
+                        context = await get_group_context("LeetCode")
+                        if context:
+                            # 1. Manually open the tabs through the urls list
+                            urls = [u["url"] for u in context.get("urls", [])]
+                            for u in urls:
+                                print(f"[Watchdog] Opening {u}")
+                                await browser.new_page(url=u)
+                            # 2. Run the agent to ensure all tabs are on the correct page
+                            tasks = context.get("tasks", [])
+                            task_names = "\n".join([f"- {t['name']}" for t in tasks])
+                            task_prompt = (
+                                "I have several tabs open for my 'LeetCode' workspace. "
+                                "Please navigate these tabs to the correct problem pages based on the following tasks:\n"
+                                f"{task_names}\n"
+                                "For example, if a task is 'Two Sum', find the corresponding problem page on NeetCode and leave the tab open there. Do NOT solve the problems."
+                            )
 
-                        print("[Watchdog] Starting Agent intervention...")
-                        agent = Agent(
-                            task=task_prompt,
-                            browser=browser,
-                            llm=ChatBrowserUse(),
-                        )
-                        await agent.run()
-                        print("[Watchdog] Intervention complete. Sleeping for 5 minutes.")
-                        await asyncio.sleep(5) # Cooldown
+                            print("[Watchdog] Starting Agent intervention...")
+                            agent = Agent(
+                                task=task_prompt,
+                                browser=browser,
+                                llm=ChatBrowserUse(),
+                            )
+                            await agent.run()
+                            print("[Watchdog] Intervention complete. Sleeping for 5 seconds.")
+                            await asyncio.sleep(5) # Cooldown
         except Exception as e:
             print(f"[Watchdog] Error in loop: {e}")
 
-        await asyncio.sleep(5)
+        await asyncio.sleep(1) # Fast poll for responsiveness
+
 
 async def cli_interface(browser: Browser):
     while True:
