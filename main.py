@@ -1,7 +1,7 @@
 import asyncio
 import os
 from dotenv import load_dotenv
-from browser_use import Agent, Browser, ChatBrowserUse
+from browser_use import Agent, Browser, ChatBrowserUse, browser
 
 from database import (
     init_db,
@@ -11,7 +11,7 @@ from database import (
     check_blacklist,
     get_all_groups,
     remove_url_from_group,
-    get_urls_for_first_active_task,
+    get_urls_for_first_active_task,toggle_blacklist
 )
 from notion_sync import sync_notion_to_db
 
@@ -102,6 +102,65 @@ async def run_agent_intervention(browser: Browser, context: dict):
     print("[Watchdog] Intervention complete. Sleeping for 5 minutes.")
     await asyncio.sleep(5) # Cooldown
 
+#TODO TO BE IMPLEMENTED
+async def check_productivity(url: str,browser: Browser) -> bool:
+    await save_urls_to_group("General", [url])
+    is_blacklisted = await check_blacklist(url)
+    
+    # Initialize a default value
+    productive = False 
+
+    if is_blacklisted:
+        print(f"[Watchdog] URL {url} is blacklisted. Checking for false positive...")
+        productive = await productivity_agent(url, browser)
+        
+        if productive:
+            print(f"[Watchdog] URL {url} is productive. Allowing access.")
+            await toggle_blacklist(url) 
+    else:
+        # If it wasn't blacklisted to begin with, it's "productive" (allowed)
+        productive = True
+        
+    return productive
+async def productivity_agent(url: str,browser: Browser) -> bool:
+    # 1. Define the structured XML prompt
+    xml_task = f"""
+<request>
+    <context>Educational Content Filter</context>
+    <data>
+        <target_url>{url}</target_url>
+    </data>
+    <instructions>
+        <task>Determine if the content of the target_url is educational or productive for schoolwork.</task>
+        <logic>Return 'yes' for learning/research/tools; 'no' for entertainment/gaming/social media.</logic>
+    </instructions>
+    <constraints>
+        <search>disabled</search>
+        <source>internal_knowledge_only</source>
+        <output_format>Return only the word 'yes' or 'no'.</output_format>
+    </constraints>
+</request>
+""".strip()
+
+    # 2. Pass the XML string as the task
+    agent = Agent(
+        task=xml_task,
+        browser=browser,
+        llm=ChatBrowserUse(),
+    )
+    # Since we are not searching, 1 step is enough for the LLM to process the string
+    result = await agent.run(max_steps=1)
+    
+    # Extract the final result string from the agent's history/output
+    # Note: Depending on your 'Agent' library, you might need result.final_answer() 
+    # or just str(result). Here we assume the result is string-convertible.
+    response_text = str(result).lower()
+    
+    print(f"[Productivity Agent] URL: {url} | Response: {response_text}")
+    
+    return "yes" in response_text
+
+
 async def watchdog_loop(browser: Browser):
     print("[Watchdog] Started monitoring...")
     last_url = None
@@ -116,19 +175,26 @@ async def watchdog_loop(browser: Browser):
                 if url and url != last_url:
                     last_url = url
                     
+                    # TODO IF URL IS BLACKLISTED THEN CALL FUNCTION CHECK PRODUCTIVITY (to be implemented)
+                    is_productive = await check_productivity(url,browser)
+                    if is_productive:
+                        continue   
                     # Trigger condition: URL contains "google.com"
-                    if "google.com" in url:
+                    # TODO CHECK IF URL IN DATABASE IS BLACKLISTED, IF NOT FOUND THEN ADD URL
+                    if not is_productive:
+                        #delete url from database and add url to database with is_blacklisted = True
+                        remove_url_from_group("General", url)
                         print(f"[Watchdog] Trigger detected: {url}. Intervening!")
 
-                    # Fetch the first active task and its associated group URLs
-                    context = await get_urls_for_first_active_task()
-                    if context:
-                        # 1. Manually open the tabs through the urls list
-                        for u in context["urls"]:
-                            print(f"[Watchdog] Opening {u}")
-                            await browser.new_page(url=u)
-                        # 2. Run the agent to ensure all tabs are on the correct page
-                        await run_agent_intervention(browser, context)
+                        # Fetch the first active task and its associated group URLs
+                        context = await get_urls_for_first_active_task()
+                        if context:
+                            # 1. Manually open the tabs through the urls list
+                            for u in context["urls"]:
+                                print(f"[Watchdog] Opening {u}")
+                                await browser.new_page(url=u)
+                            # 2. Run the agent to ensure all tabs are on the correct page
+                            await run_agent_intervention(browser, context)
         except Exception as e:
             print(f"[Watchdog] Error in loop: {e}")
 
