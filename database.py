@@ -1,7 +1,11 @@
 import aiosqlite
+from google import genai
+from dotenv import load_dotenv
+from urllib.parse import urlparse
 
 DB_PATH = "databases/pilot.db"
 
+load_dotenv()
 
 async def _connect():
     """Open a connection with foreign keys enabled and row factory set."""
@@ -17,10 +21,36 @@ async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         with open("databases/schema.sql", "r") as f:
             await db.executescript(f.read())
+
+        # Migration: Add domain column to URLs table if it doesn't exist
+        try:
+            cursor = await db.execute("PRAGMA table_info(URLs)")
+            columns = [row[1] for row in await cursor.fetchall()]
+            if "domain" not in columns:
+                await db.execute("ALTER TABLE URLs ADD COLUMN domain TEXT")
+                await db.commit()
+            
+            # Backfill domains for all existing URLs
+            cursor = await db.execute("SELECT id, url FROM URLs WHERE domain IS NULL OR domain = ''")
+            rows = await cursor.fetchall()
+            for row in rows:
+                url_id, url = row[0], row[1]
+                try:
+                    parsed_url = urlparse(url)
+                    domain = parsed_url.netloc
+                    if domain.startswith("www."):
+                        domain = domain[4:]
+                    await db.execute("UPDATE URLs SET domain = ? WHERE id = ?", (domain, url_id))
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"Migration error: {e}")
+
         await db.commit()
 
 
 # ── Part 2: Group & Workspace ─────────────────────────────────────────────────
+
 
 async def add_group(name, description="") -> int:
     db = await _connect()
@@ -88,14 +118,35 @@ async def get_group_context(group_name) -> dict:
 
 
 # ── Part 3: URL & Watchdog ────────────────────────────────────────────────────
-
+# TODO: Check if url should be blocked (Gemini API)
+async def blackout(url: str) -> bool:
+    client =  genai.Client()
+    response = await client.aio.models.generate_content(
+        model="gemini-flash-latest",
+        contents=f"Check if this domain is a social media site or a gaming site,respond with only 'Yes' or 'No': {url},"
+    )
+    if response.text:
+        return "yes" in response.text.strip().lower()
+    return False
+    
 async def check_blacklist(url) -> bool:
-    """Returns True if the given URL matches any blacklisted pattern (prefix match)."""
+    """Returns True if the given URL matches any blacklisted pattern (prefix match) or domain match."""
     db = await _connect()
     try:
+        # Extract domain from URL
+        parsed = urlparse(url)
+        domain = parsed.netloc
+        if domain.startswith("www."):
+            domain = domain[4:]
+
+        # Query for matches by prefix or by exact domain
         cursor = await db.execute(
-            "SELECT 1 FROM URLs WHERE ? LIKE url || '%' AND is_blacklisted = 1",
-            (url,)
+            """
+            SELECT 1 FROM URLs 
+            WHERE (? LIKE url || '%' OR (domain = ? AND domain != '')) 
+            AND is_blacklisted = 1
+            """,
+            (url, domain)
         )
         row = await cursor.fetchone()
         return row is not None
@@ -114,15 +165,68 @@ async def save_urls_to_group(group_name, urls: list):
         group_id = group["id"]
 
         for url in urls:
-            await db.execute("INSERT OR IGNORE INTO URLs (url) VALUES (?)", (url,))
-            cursor = await db.execute("SELECT id FROM URLs WHERE url = ?", (url,))
+            # Extract domain from URL
+            domain = ""
+            try:
+                parsed_url = urlparse(url)
+                domain = parsed_url.netloc
+                if domain.startswith("www."):
+                    domain = domain[4:] # Remove www. prefix for cleaner grouping
+            except Exception:
+                pass
+
+            # Check if URL exists
+            cursor = await db.execute("SELECT id, domain FROM URLs WHERE url = ?", (url,))
             url_row = await cursor.fetchone()
+            if not url_row:
+                print(f"🔍 New URL detected: {url}. Checking with Gemini...")
+                is_blacklisted = await blackout(url)
+                # Save the new URL to the DB with domain and AI blacklist result
+                await db.execute(
+                    "INSERT INTO URLs (url, domain, is_blacklisted) VALUES (?, ?, ?)", 
+                    (url, domain, 1 if is_blacklisted else 0)
+                )
+                # Get the ID of the row we just created
+                cursor = await db.execute("SELECT id FROM URLs WHERE url = ?", (url,))
+                url_row = await cursor.fetchone()
+            else:
+                print(f"✅ {url} found in local DB. Updating domain if needed.")
+                # Backfill domain if it's currently empty
+                if not url_row["domain"] or url_row["domain"] == "":
+                    await db.execute("UPDATE URLs SET domain = ? WHERE id = ?", (domain, url_row["id"]))
             await db.execute(
                 "INSERT OR IGNORE INTO Group_URLs (group_id, url_id) VALUES (?, ?)",
                 (group_id, url_row["id"])
             )
 
         await db.commit()
+    finally:
+        await db.close()
+
+
+async def remove_url_from_group(group_name: str, url: str) -> bool:
+    """Removes a URL from a group's context. Returns True if successfully removed."""
+    db = await _connect()
+    try:
+        cursor = await db.execute(
+            """
+            SELECT gu.group_id, gu.url_id 
+            FROM Group_URLs gu
+            JOIN Groups g ON g.id = gu.group_id
+            JOIN URLs u ON u.id = gu.url_id
+            WHERE g.name = ? AND u.url = ?
+            """, (group_name, url)
+        )
+        link = await cursor.fetchone()
+        
+        if link:
+            await db.execute(
+                "DELETE FROM Group_URLs WHERE group_id = ? AND url_id = ?",
+                (link["group_id"], link["url_id"])
+            )
+            await db.commit()
+            return True
+        return False
     finally:
         await db.close()
 
