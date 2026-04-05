@@ -245,6 +245,15 @@ async def toggle_blacklist(url) -> bool:
     finally:
         await db.close()
 
+async def blacklisted(url) -> bool:
+    """Returns True if the specified URL is blacklisted."""
+    db = await _connect()
+    try:
+        cursor = await db.execute("SELECT 1 FROM URLs WHERE url = ? AND is_blacklisted = 1", (url,))
+        row = await cursor.fetchone()
+        return row is not None
+    finally:
+        await db.close()
 
 # ── Part 4: Task Endpoints ────────────────────────────────────────────────────
 

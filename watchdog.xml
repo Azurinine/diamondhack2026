@@ -1,0 +1,20 @@
+<prompt>
+  <context>
+    <purpose>Educational Content Filter for Watchdog App</purpose>
+    <target_url>{url}</target_url>
+  </context>
+  
+  <task>
+    <instruction>Analyze the provided URL to determine if it is educational or conducive to schoolwork.</instruction>
+    <logic>
+      <positive_condition>Return 'yes' if the site is for learning, research, or productivity.</positive_condition>
+      <negative_condition>Return 'no' if the site is for entertainment, gaming, or non-educational social media.</negative_condition>
+    </logic>
+  </task>
+
+  <constraints>
+    <search_access>disabled</search_access>
+    <method>Use internal knowledge and URL pattern recognition only. Do not perform a web search.</method>
+    <output_restriction>Strictly respond with only 'yes' or 'no'. No punctuation or extra text.</output_restriction>
+  </constraints>
+</prompt>
